@@ -80,6 +80,7 @@ CMD_ONE_ARG(do_freeze);			/* FREEZE a frozen queue entry */
 CMD_TWO_ARG(do_function);		/* Make iser-def global function */
 CMD_ONE_ARG(do_get);			/* Get an object */
 CMD_TWO_ARG(do_give);			/* Give something away */
+CMD_ONE_ARG(do_goto);
 CMD_TWO_ARG_ARGV(do_grep);
 CMD_ONE_ARG(do_global);			/* Enable/disable global flags */
 CMD_ONE_ARG(do_halt);			/* Remove commands from the queue */
@@ -88,10 +89,11 @@ CMD_ONE_ARG(do_hide);			/* Hide/Unhide from WHO */
 CMD_ONE_ARG(do_hook);			/* Warp various timers */
 CMD_TWO_ARG_ARGV(do_icmd);
 CMD_TWO_ARG_ARGV_CMDARG(do_include);	/* @include attribute into command */
+CMD_TWO_ARG_ARGV_CMDARG(do_rollback);	/* @rollback attribute into command */
 CMD_NO_ARG(do_inventory);		/* Print what I am carrying */
-CMD_NO_ARG(do_worn);		        /* Print what I am wearing */
-CMD_NO_ARG(do_wielded);		        /* Print what I am wielding */
+CMD_TWO_ARG_CMDARG(do_jump);
 CMD_TWO_ARG(do_kill);			/* Kill something */
+CMD_TWO_ARG(do_label);			/* %_ label adding/removing of attribs */
 CMD_ONE_ARG(do_last);			/* Get recent login info */
 CMD_TWO_ARG(do_log);			/* Get recent login info */
 CMD_NO_ARG(do_logrotate);		/* Rotate or find status of current logfile */
@@ -102,6 +104,7 @@ CMD_ONE_ARG(do_list);			/* List contents of internal tables */
 CMD_ONE_ARG(do_list_file);		/* List contents of message files */
 CMD_TWO_ARG(do_lock);			/* Set a lock on an object */
 CMD_ONE_ARG(do_look);			/* Look here or at something */
+CMD_TWO_ARG(do_lset);                    /* Set flags on locks */
 /* SENSES */
 CMD_ONE_ARG(do_listen);			/* SENSES - listen here or at something */
 CMD_ONE_ARG(do_touch);			/* SENSES - touch location or target */
@@ -154,9 +157,10 @@ CMD_ONE_ARG(do_say);			/* Messages to all */
 CMD_NO_ARG(do_score);			/* Display my wealth */
 CMD_ONE_ARG(do_search);			/* Search for objs matching criteria */
 CMD_ONE_ARG(do_search_for_players);
-CMD_NO_ARG(do_selfboot);
+CMD_ONE_ARG(do_selfboot);
 CMD_TWO_ARG(do_set);			/* Set flags or attributes */
 CMD_TWO_ARG(do_toggle);			/* Set flags or attributes */
+CMD_TWO_ARG(do_api);			/* Set flags or attributes */
 CMD_NO_ARG(do_tor);			/* TOR cache manipulation */
 CMD_TWO_ARG_SEP(do_setattr);		/* Set object attribute */
 CMD_TWO_ARG(do_setvattr);		/* Set variable attribute */
@@ -191,7 +195,9 @@ CMD_TWO_ARG_ARGV(do_verb);		/* Execute a user-created verb */
 CMD_TWO_ARG_CMDARG(do_wait);		/* Perform command after a wait */
 CMD_NO_ARG(do_whereall);
 CMD_ONE_ARG(do_whereis);
+CMD_NO_ARG(do_wielded);		        /* Print what I am wielding */
 CMD_ONE_ARG(do_wipe);			/* Mass-remove attrs from obj */
+CMD_NO_ARG(do_worn);		        /* Print what I am wearing */
 CMD_TWO_ARG(do_snoop);			/* port redirection for immortals */
 /*CMD_NO_ARG(do_dbclean); */		/* Clean db of unused attributes */
 #ifdef REALITY_LEVELS
@@ -242,6 +248,7 @@ typedef struct aliasentry {
 #define	CS_STRIP_AROUND	 0x0400	/* Strip braces around entire string only */
 #define CS_SEP		 0x0800
 #define CS_PASS_SWITCHES 0x1000 /* Pass switches unparsed */
+#define CS_ROLLBACK      0x2000 /* Special rollback */
 /* Command permission flags */
 
 #define CA_PUBLIC	0x00000000	/* No access restrictions */
@@ -289,8 +296,19 @@ typedef struct aliasentry {
 #define CA_NO_EVAL	0x00000002      /* Code doesn't eval? */
 #define CA_EVAL		0x00000004      /* Code evals? */
 #define CA_CLUSTER	0x00000010	/* Clustered? */
+#define CA_NO_PARSE	0x00000020	/* Arguments incoming are not parsed but substitutions are */
+#define CA_SB_BYPASS	0x20000000	/* Function can not be bypassed */
+#define CA_SB_DENY	0x40000000      /* Function is sandbox denied */
+#define CA_SB_IGNORE	0x80000000      /* Function is sandbox ignored */
 
 #define BREAK_INLINE	0x00000001	/* @break/@assert should not go to wait queue */
+#define GOTO_LABEL	0x00000001	/* @goto label marker */
+
+
+#define ADMIN_LOAD	0x00000001	/* @admin/load the parameters */
+#define ADMIN_SAVE	0x00000002	/* @admin/save the parameters */
+#define ADMIN_EXECUTE	0x00000004	/* @admin/execute (run) the parameters */
+#define ADMIN_LIST	0x00000008	/* @admikn/list the config params */
 
 #define HOOK_BEFORE	0x00000001	/* BEFORE hook */
 #define HOOK_AFTER	0x00000002	/* AFTER hook */
@@ -301,8 +319,11 @@ typedef struct aliasentry {
 #define HOOK_CLEAR	0x00000040	/* CLEAR hook */
 #define HOOK_LIST	0x00000080	/* LIST hooks */
 #define HOOK_FAIL       0x00000100      /* FAIL hooks */
+#define HOOK_INCLUDE	0x00000200	/* Process hooks as if it's an include */
+
+#define QUITPRG_QUIET	0x00000001	/* silently quitprogram target */
 
 extern int	FDECL(check_access, (dbref, int, int, int));
-extern void	FDECL(process_command, (dbref, dbref, int, char *, char *[], int, int));
+extern void	FDECL(process_command, (dbref, dbref, int, char *, char *[], int, int, int));
 
 #endif

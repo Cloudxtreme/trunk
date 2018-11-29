@@ -1240,7 +1240,7 @@ db_read(FILE * f, int *db_format, int *db_version, int *db_flags)
 /*                      s_Zone(i, NOTHING); */
 	    tempbool = getboolexp(f);
 	    atr_add_raw(i, A_LOCK,
-			unparse_boolexp_quiet(1, tempbool));
+	    unparse_boolexp_quiet(GOD, tempbool));
 	    free_boolexp(tempbool);
 	    atr_add_raw(i, A_FAIL, (char *) getstring_noalloc(f));
 	    atr_add_raw(i, A_SUCC, (char *) getstring_noalloc(f));
@@ -1361,7 +1361,7 @@ db_read(FILE * f, int *db_format, int *db_version, int *db_flags)
 	    if (read_key) {
 		tempbool = getboolexp(f);
 		atr_add_raw(i, A_LOCK,
-			    unparse_boolexp_quiet(1, tempbool));
+			    unparse_boolexp_quiet(GOD, tempbool));
 		free_boolexp(tempbool);
 		if (read_pern_key) {
 
@@ -1369,13 +1369,11 @@ db_read(FILE * f, int *db_format, int *db_version, int *db_flags)
 
 		    tempbool = getboolexp(f);
 		    atr_add_raw(i, A_LUSE,
-				unparse_boolexp_quiet(1,
-						      tempbool));
+				unparse_boolexp_quiet(GOD, tempbool));
 		    free_boolexp(tempbool);
 		    tempbool = getboolexp(f);
 		    atr_add_raw(i, A_LENTER,
-				unparse_boolexp_quiet(1,
-						      tempbool));
+				unparse_boolexp_quiet(GOD, tempbool));
 		    free_boolexp(tempbool);
 		}
 	    }
@@ -1584,10 +1582,12 @@ db_write_object(FILE * f, dbref i, int db_format, int flags, int key)
 		    if (flags & V_ATRNAME)
 			save = 1;
 		    break;
+/* -- This was commented out so allow permissions to be saved/loaded in flatfiles 
 		case A_LOCK:
 		    if (flags & V_ATRKEY)
 			save = 1;
 		    break;
+*/
 		case A_LIST:
 		case A_MONEY:
 		    break;
@@ -1619,11 +1619,12 @@ remote_read_sanitize(FILE *f, dbref i, int db_format, int flags)
 
    i_count = 0;
    i_ref = getref(f);
+   t_str = NULL;
    if ( feof(f) || (i_ref < 0) || (i_ref > 7) )
       return(1);
    if (!(flags & V_ATRNAME)) 
       t_str = (char *)getstring_noalloc(f); /* Player name */
-   if ( feof(f) || !*t_str )
+   if ( feof(f) || !t_str || !*t_str )
       return(1);
    t_str = (char *)getstring_noalloc(f); /* Location */
    if ( feof(f) || (*t_str == '>') )
@@ -1748,7 +1749,7 @@ remote_read_obj(FILE *f, dbref i, int db_format, int flags, int *i_count)
    i_ref = getref(f);		/* Grab Next - toss it away */
    if (!(flags & V_ATRKEY)) {
       tempbool = getboolexp(f);
-      atr_add_raw(i, A_LOCK, unparse_boolexp_quiet(1, tempbool));
+      atr_add_raw(i, A_LOCK, unparse_boolexp_quiet(GOD, tempbool));
       free_boolexp(tempbool);
    }
    i_ref = getref(f);		/* Grab owner - toss it away */

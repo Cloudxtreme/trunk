@@ -5,15 +5,17 @@
 @@ FUNPR_ -- Preserved function
 @@ FUNPV_ -- Privileged function
 @@ FUNP_  -- Preserved & Privileged function
+@@ FUNPT_ -- Privileged & NoTrace function
 @create SoftFunctions
+@desc SoftFunctions=The%bfollowing%bsoftfunctions%bcan%bbe%bquoted%bin%bto%bmimic%bMUX/PENN%bmissing%bfunctionality%rNote:%byou'll%bneed%bto%brename%bexisting%bcolumns%(%)%bto%bcolumn%(%).%b%bThe%bscript%bshould%rtake%bcare%bof%bthis%bautomatically.%r[space(5)]FUN_[space(3)]--%bNormal%bfunction%r[space(5)]FUNPR_%b--%bPreserved%bfunction%r[space(5)]FUNPV_%b--%bPrivileged%bfunction%r[space(5)]FUNP_%b%b--%bPreserved%b&%bPrivileged%bfunction%r[space(5)]FUNPT_%b--%bPrivileged%b&%bNoTrace%bfunction%r%r%rMINMAX values can be assigned with:%rMINMAX_<functionname>.  It takes two values.  MIN and MAX value.  Both are required.%r%rAny sideeffects that need to be assigned please use the SFSideFX function to call into it for security reasons.
 @create SFSideFX
 @set SFSideFX=!no_command !halt inh safe indestructable sidefx
 @set SoftFunctions=!no_command !halt inh safe indestructable
 @fo me=&SIDEFX SoftFunctions=[num(SFSideFX)]
-&FUN_COLUMN Soft=[columns(%0,min(sub(79,ifelse(gt(%3,78),1,%3)),%1),div(sub(79,ifelse(gt(%3,78),1,%3)),%1),l,,,ifelse(gt(words(%3),0),space(%3)),,,1,%2)]
+&FUN_COLUMN Soft=[columns(%0,min(sub(79,ifelse(gt(%3,78),1,%3)),%1),div(sub(79,ifelse(gt(%3,78),1,%3)),%1),l,,,ifelse(gt(words(%3),0),space(%3)),,,1,%2)]%r
 &MINMAX_COLUMN Soft=2 4
-&FUN_TABLE SoftFunctions=[columns(%0,switch([gt(words(%1),0)][gt(words(%2),0)],11,min(%1,%2),01,max(10,%2),*,10),switch([gt(words(%1),0)][gt(words(%2),0)],11,max(1,div(%2,%1)),10,max(1,div(78,%1)),01,max(1,div(%2,10)),*,7),L,0,1,,ifelse(strlen(%4),%4,%b),,1,%3)]
-&MINMAX_TABLE Soft=1 5
+&FUN_TABLE SoftFunctions=[columns(%0,switch([gt(words(%1),0)][gt(words(%2),0)],11,min(%1,%2),01,max(10,%2),*,10),switch([gt(words(%1),0)][gt(words(%2),0)],11,max(1,div(%2,%1)),10,max(1,div(78,%1)),01,max(1,div(%2,10)),*,7),L,0,1,,ifelse(strlen(%4),%4,%b),,1,%3,%5)]
+&MINMAX_TABLE Soft=1 6
 &FUNPR_LSEARCH Soft=[setq(0,ifelse(match(%0,all),,%0))][ifelse(words(%4),search(%q0 %1=%2,%3,%4),search(%q0 %1=%2))]
 &FUN_LPOS soft=[setdiff(totpos(%1,%0),#-1)]
 &MINMAX_LPOS Soft=2 2
@@ -35,7 +37,7 @@
 &MINMAX_TIMESTRING soft=1 2
 &FUN_ITEMIZE soft=[elist(%0,%2,%1,%4,%3)]
 &MINMAX_ITEMIZE soft=1 4
-&FUN_LPARENT soft=[localize([setr(0,num(%0))] [setdiff(parents(r(0)),#-1 #-2)])]
+&FUN_LPARENT soft=[localize([setr(0,num(%0))] [listdiff(parents(r(0)),#-1 #-2)])]
 &MINMAX_LPARENT soft=1 1
 &FUN_EXPTIME soft=[timefmt($!Zy $!EM $!Cd $!Xh $!Fm $Gs,%0)]
 &MINMAX_EXPTIME soft=1 1
@@ -72,24 +74,50 @@
 &FUNFLAG_LETQ soft=no_eval
 &FUN_SORTKEY soft=[munge(#lambda/%[sort%(%%0%,%2%,%3%)%],iter(%1,edit(u(%0,itext(0)),%b,),ifelse(!$v(3),%b,%3),ifelse(!$v(3),%b,%3)),%1,ifelse(!$v(3),%b,%3),ifelse(!$v(4),ifelse(!$v(3),%b,%3),%4))]
 &MINMAX_SORTKEY soft=2 5
-&FUN_ALIGN soft=[printf([iter(%0,$[case(mid(%i0,0,1),<,-[delete(%i0,0,1)],>,[delete(%i0,0,1)],_,_[delete(%i0,0,1)],-,^[delete(%i0,0,1)],=,_[delete(%i0,0,1)],-%i0)]|"s)],%1,%2,%3,%4,%5,%6,%7,%8,%9)]
-&FUN_NCOND me=[strfunc(switch,0 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
-&FUN_NCONDALL me=[strfunc(switchall,0 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
-&FUN_COND me=[strfunc(switch,1 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
-&FUN_CONDALL me=[strfunc(switchall,1 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
-&MINMAX_NCOND soft=2 2
-&MINMAX_NCONDALL soft=2 2
-&MINMAX_COND soft=2 2
-&MINMAX_CONDALL soft=2 2
-&FUNPR_FIRSTOF soft=[trim(iter(lnum(0,sub(%+,2)),ifelse(!!^setr(0,s(v(%i0))),%q0[ibreak(0)])))][ifelse(!^r(0),s(v(sub(%+,1))))]
-&FUNPR_ALLOF soft=[trim(squish(iter(lnum(0,sub(%+,2)),ifelse(!!^setr(0,s(v(%i0))),%q0),%b,v(sub(%+,1))),v(sub(%+,1))),,v(sub(%+,1)))]
-&FUNPR_STRFIRSTOF soft=[trim(iter(lnum(0,sub(%+,2)),ifelse(!$^setr(0,s(v(%i0))),%q0[ibreak(0)])))][ifelse(!^r(0),s(v(sub(%+,1))))]
-&FUNPR_STRALLOF soft=[trim(squish(iter(lnum(0,sub(%+,2)),ifelse(!$^setr(0,s(v(%i0))),%q0),%b,v(sub(%+,1))),v(sub(%+,1))),,v(sub(%+,1)))]
+@@ &FUN_ALIGN soft=[printf([iter(%0,$[case(mid(%i0,0,1),<,-[delete(%i0,0,1)],>,[delete(%i0,0,1)],_,_[delete(%i0,0,1)],-,^[delete(%i0,0,1)],=,_[delete(%i0,0,1)],-%i0)]|"s)],%1,%2,%3,%4,%5,%6,%7,%8,%9)]
+&FUN_ALIGNFILTER soft=[iter(%0,$[before(strip(pedit(%i0,=,_,-,^,<,-,.,),$#Xx>),%()][ifelse(wildmatch(*>* *<* *=* *-* *_*,%i0),,-)][ifelse(!^or(pos(x,%i0),pos(X,%i0)),|")][ifelse(and(!^pos($,%i0),gt(%2,%1)),:%3:)]s)]
+&FUN_ALIGN soft=[printf([alignfilter(%0,words(%0),sub(%+,1),v(sub(%+,1)))],%1,%2,%3,%4,%5,%6,%7,%8,%9,v(10),v(11),v(12),v(13),v(14),v(15),v(16),v(17),v(18),v(19),v(20),v(21),v(22),v(23),v(24),v(25),v(26),v(27))]
+&FUN_NCOND soft=[strfunc(switch,0 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
+&FUN_NCONDALL soft=[strfunc(switchall,0 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
+&FUN_COND soft=[strfunc(switch,1 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
+&FUN_CONDALL soft=[strfunc(switchall,1 [iter(lnum(0,%+),ifelse(mod(%i0,2),%%%i0,%[t%(%%%i0%)%]))],%b)]
+&FUNPT_RLCON soft=[ifelse(and(hastype(%@,room),member(get(%@/_RLCON),crc32(get(%@/conformat)))),objeval(%#,lcon(here)),objeval(%@,lcon(me)))]
+&FUNPT_RLEXITS soft=[ifelse(and(hastype(%@,room),member(get(%@/_RLEXITS),crc32(get(%@/exitformat)))),objeval(%#,lexits(here)),objeval(%@,lexits(me)))]
+&FUNPR_SETSYMDIFF soft=[setq(0,setinter(%0,%1,%2,%2,%4))][listunion(setdiff(%0,%q0,%2,%2,%4),setdiff(%1,%q0,%2,%2,%4),%2,%3)]
+&FUNPR_SETSYMDIFF soft=[setq(0,listinter(%0,%1,%2,%2,%4))][listunion(listdiff(%0,%q0,%2,%2,%4),listdiff(%1,%q0,%2,%2,%4),%2,%3)]
+&MINMAX_NCOND soft=2 -1
+&MINMAX_NCONDALL soft=2 -1 
+&MINMAX_COND soft=2 -1 
+&MINMAX_CONDALL soft=2 -1
+@@ Old systems -- Use prior to 3.9.5p2
+@@ &FUNPR_FIRSTOF soft=[trim(iter(lnum(0,sub(%+,2)),ifelse(!!^setr(0,s(v(%i0))),%q0[ibreak(0)])))][ifelse(!^r(0),s(v(sub(%+,1))))]
+@@ &FUNPR_ALLOF soft=[trim(squish(iter(lnum(0,sub(%+,2)),ifelse(!!^setr(0,s(v(%i0))),%q0),%b,v(sub(%+,1))),v(sub(%+,1))),,v(sub(%+,1)))]
+@@ &FUNPR_STRFIRSTOF soft=[trim(iter(lnum(0,sub(%+,2)),ifelse(!$^setr(0,s(v(%i0))),%q0[ibreak(0)])))][ifelse(!^r(0),s(v(sub(%+,1))))]
+@@ &FUNPR_STRALLOF soft=[trim(squish(iter(lnum(0,sub(%+,2)),ifelse(!$^setr(0,s(v(%i0))),%q0),%b,v(sub(%+,1))),v(sub(%+,1))),,v(sub(%+,1)))]
+&FUN_FIRSTOF soft=[ofparse(1,%0,%1,%2,%3,%4,%5,%6,%7,%8,%9)]
+&FUN_ALLOF soft=[ofparse(2,%0,%1,%2,%3,%4,%5,%6,%7,%8,%9)]
+&FUN_STRFIRSTOF soft=[ofparse(5,%0,%1,%2,%3,%4,%5,%6,%7,%8,%9)]
+&FUN_STRALLOF soft=[ofparse(6,%0,%1,%2,%3,%4,%5,%6,%7,%8,%9)]
 &FUNPV_HEIGHT soft=[default(%#/HEIGHT,default([owner(%#)]/HEIGHT,24))]
 &FUNPV_WIDTH soft=[default(%#/WIDTH,default([owner(%#)]/WIDTH,78))]
 &FUN_VMAX soft=[sortlist(+n,%2,%0,%1)]
 &FUN_VMIN soft=[sortlist(-n,%2,%0,%1)]
+&FUN_CPAD soft=[printf($^%1:%2:+s,%0)]
+&FUN_RPAD soft=[printf($%1:%2:+s,%0)]
+&FUN_LPAD soft=[printf($-%1:%2:+s,%0)]
+&FUN_LEHRAND soft=[trunc(fmod(fmod(mul(max(rand(%0),1),279470273),4294967291),%0))]
+&FUN_BASECONV soft=[pack(unpack(%0,%1,1),%2,1)]
+&FUN_MEDIAN soft=[ifelse(mod(%+,2),v(div(%+,2)),fdiv(ladd(iter(lnum(%+),v(%i0))),2))]
+&FUN_LOCKFILTER soft=[testlock(%0,%1,0,%2)]
+&MINMAX_LOCKFILTER soft=2 3
+&FUNPR_GRADIENT soft=[setq(9,ifelse(lte(%2,0),strlen(%3),%2))][setq(a,colors(ifelse(neq(2,strlen(%0)),%0,first(colors(0x%0,n))),x))][setq(b,colors(ifelse(neq(2,strlen(%1)),%1,first(colors(0x%1,n))),x))][setq(0,[mid(%qa,1,2)] [mid(%qa,3,2)] [mid(%qa,5,2)])][setq(1,[mid(%qb,1,2)] [mid(%qb,3,2)] [mid(%qb,5,2)])][setq(c,iter(lnum(0,add(1,min(%q9,255))),iter(lnum(1,3),printf($02s,tohex(add(0x[extract(%q0,%i0,1)],div(mul(%i1,sub(0x[extract(%q1,%i0,1)],0x[extract(%q0,%i0,1)])),min(%q9,255))))),,)))][citer(%3,ifelse(!words( ## ),%b,ansi([ifelse(eq(1,%4),h)] #[extract(%qc,setr(d,add(1,mod(sub(#@,1),sub(words(%qc),1)))),1)], ## )),)]
+@@ This is the foreach() version -- more computationally heavy but cleaner all around
+@@ &FUNPR_GRADIENT soft=[setq(9,min(ifelse(lte(%2,0),sub(strlen(%3),1),%2),255))][setq(a,colors(ifelse(neq(2,strlen(%0)),%0,first(colors(0x%0,n))),x))][setq(b,colors(ifelse(neq(2,strlen(%1)),%1,first(colors(0x%1,n))),x))][setq(0,[mid(%qa,1,2)] [mid(%qa,3,2)] [mid(%qa,5,2)])][setq(1,[mid(%qb,1,2)] [mid(%qb,3,2)] [mid(%qb,5,2)])][setq(c,iter(lnum(0,add(1,%q9)),iter(lnum(1,3),printf($02s,tohex(add(0x[extract(%q0,%i0,1)],div(mul(%i1,sub(0x[extract(%q1,%i0,1)],0x[extract(%q0,%i0,1)])),%q9)))),,)))][setq(d,words(%qc))][setq(e,ifelse(eq(1,%4),h))][foreach(#lambda/[lit([ansi(%qe #[extract(%qc,add(1,mod(%1,sub(%qd,1))),1)],switch(asc(%0),37,%<037>,92,%<092>,10,%r,%0))])],edit(%3,%r,mid(%r,1,1)))]
+&MINMAX_GRADIENT soft=4 5
 @fo softfunc=&DB me=num(softfunc)
 @tel SFSideFX=softfunctions
-@startup softfunc=@dolist lattr([v(db)]/fun_*)=@function [after(##,_)]=[v(db)]/##;@dolist lattr([v(db)]/funp_*)=@function/priv/pres [after(##,_)]=[v(db)]/##;@dolist lattr([v(DB)]/funpr_*)=@function/pres [after(##,_)]=[v(DB)]/##;@dolist lattr([v(db)]/funpv_*)=@function/priv [after(##,_)]=[v(DB)]/##;@wait 10={@dolist lattr([v(db)]/funflag_*)=@admin function_access=[after(##,_)] [get([v(db)]/##)]};@wait 10=@dolist lattr([v(db)]/minmax_*)={@function/min [after(##,_)]=[first(get([v(db)]/##))];@function/max [after(##,_)]=[rest(get([v(db)]/##))]}
-@@ think Issue this command:  @dolist search\(flags=P\)=@swi \[words\(get\(##/race\)\)\]=0,@cpattr/clear ##/RACE=##/race
+@startup softfunc=@dolist lattr([v(db)]/fun_*)=@function [after(##,_)]=[v(db)]/##;@dolist lattr([v(db)]/funp_*)=@function/priv/pres [after(##,_)]=[v(db)]/##;@dolist lattr([v(DB)]/funpr_*)=@function/pres [after(##,_)]=[v(DB)]/##;@dolist lattr([v(db)]/funpv_*)=@function/priv [after(##,_)]=[v(DB)]/##;@dolist lattr([v(db)]/funpt_*)=@function/priv/notrace [after(##,_)]=[v(db)]/##;@wait 10={@dolist lattr([v(db)]/funflag_*)=@admin function_access=[after(##,_)] [get([v(db)]/##)]};@wait 10=@dolist lattr([v(db)]/minmax_*)={@function/min [after(##,_)]=[first(get([v(db)]/##))];@function/max [after(##,_)]=[rest(get([v(db)]/##))]}
+@@
+@@ On a converted flatfile you may have duplicated RACE attributes and GUILD attributes.
+@@ Issue this command:  @dolist search\(flags=P\)=@swi \[words\(get\(##/race\)\)\]=0,@cpattr/clear ##/RACE=##/race
+@@ Issue this command:  @dolist search\(flags=P\)=@swi \[words\(get\(##/guild\)\)\]=0,@cpattr/clear ##/GUILD=##/guild

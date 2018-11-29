@@ -6,7 +6,6 @@ char *strtok_r(char *, const char *, char **);
 #endif
 
 #include <dirent.h>
-#include <sys/dir.h>
 #include "copyright.h"
 #include "autoconf.h"
 
@@ -22,21 +21,88 @@ char *strtok_r(char *, const char *, char **);
 #include "alloc.h"
 #include "attrs.h"
 #include "door.h"
+#include "rhost_ansi.h"
 
 extern void remote_write_obj(FILE *, dbref, int, int);
 extern int remote_read_obj(FILE *, dbref, int, int, int*);
 extern int remote_read_sanitize(FILE *, dbref, int, int);
 extern dbref FDECL(match_thing, (dbref, char *));
 
+static const char *
+time_format_1(time_t dt)
+{
+    register struct tm *delta;
+    static char buf[64];
+
+
+    if (dt < 0)
+        dt = 0;
+
+    delta = gmtime(&dt);
+    if ((int)dt >= 31556926 ) {
+        sprintf(buf, "%dy", (int)dt / 31556926);
+    } else if ((int)dt >= 2629743 ) {
+        sprintf(buf, "%dM", (int)dt / 2629743);
+    } else if ((int)dt >= 604800) {
+        sprintf(buf, "%dw", (int)dt / 604800);
+    } else if (delta->tm_yday > 0) {
+        sprintf(buf, "%dd", delta->tm_yday);
+    } else if (delta->tm_hour > 0) {
+        sprintf(buf, "%dh", delta->tm_hour);
+    } else if (delta->tm_min > 0) {
+        sprintf(buf, "%dm", delta->tm_min);
+    } else {
+        sprintf(buf, "%ds", delta->tm_sec);
+    }
+    return(buf);
+}
+
+static const char *
+wiz_time_format_2(time_t dt)
+{
+    register struct tm *delta;
+    static char buf[64];
+
+
+    if (dt < 0)
+        dt = 0;
+
+    delta = gmtime(&dt);
+    if ((int)dt >= 31556926 ) {
+        sprintf(buf, "%dy", (int)dt / 31556926);
+    } else if ((int)dt >= 2629743 ) {
+        sprintf(buf, "%dM", (int)dt / 2629743);
+    } else if ((int)dt >= 604800) {
+        sprintf(buf, "%dw", (int)dt / 604800);
+    } else if (delta->tm_yday > 0) {
+        sprintf(buf, "%dd", delta->tm_yday);
+    } else if (delta->tm_hour > 0) {
+        sprintf(buf, "%dh", delta->tm_hour);
+    } else if (delta->tm_min > 0) {
+        sprintf(buf, "%dm", delta->tm_min);
+    } else {
+        sprintf(buf, "%ds", delta->tm_sec);
+    }
+    return(buf);
+}
+
 void do_teleport(dbref player, dbref cause, int key, char *slist, 
 		 char *dlist[], int nargs)
 {
   dbref	victim, destination, loc;
-  char	*to, *arg1, *arg2;
+  char	*to, *arg1, *arg2, separgs[3], *tstrtokr;
   int	con, dcount, quiet, side_effect=0, tel_bool_chk;
 
 	/* get victim */
+      if ( mudstate.remotep != NOTHING) {
+         notify(player, "You can't teleport.");
+         return;
+      }
 
+      if ( !mudstate.argtwo_fix && nargs && !*dlist[0] ) {
+         notify(player, "No valid destination to teleport to.");
+         return;
+      }
       tel_bool_chk = 0;
       if (key & TEL_QUIET) {
 	key &= ~TEL_QUIET;
@@ -52,12 +118,18 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 	notify(player,"No destination given.");
 	return;
       }
+      memset(separgs, '\0', sizeof(separgs));
+
       if ((key != TEL_LIST) && (nargs > 1))
 	notify(player,"Extra destinations ignored."); 
       dcount = 0;
       con = 1;
       if (key == TEL_LIST) {
-	arg1 = strtok(slist," ");
+        if ( strchr(slist, ',') != NULL )
+           *separgs = ',';
+        else
+           *separgs = ' ';
+	arg1 = strtok_r(slist, separgs, &tstrtokr);
 	if (!arg1) {
 	  notify(player,"No match.");
 	}
@@ -107,7 +179,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		  if (key != TEL_LIST)
 		    continue;
 		  else {
-		    arg1 = strtok(NULL," ");
+		    arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		    continue;
 		  }
 		}
@@ -122,7 +194,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -137,7 +209,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -147,7 +219,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -156,11 +228,11 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
-	if ( (mudstate.remotep == victim) || (No_tel(victim) && !Wizard(player)) ) {
+	if ( (mudstate.remotep != NOTHING) || (No_tel(victim) && !Wizard(player)) ) {
 		if( victim == player )
 			notify_quiet(player,"You aren't allowed to @tel.");
 		else
@@ -168,7 +240,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -182,7 +254,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -195,7 +267,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	}
@@ -212,7 +284,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	case AMBIGUOUS:
@@ -221,7 +293,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		if (key != TEL_LIST)
 		  continue;
 		else {
-		  arg1 = strtok(NULL," ");
+		  arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		  continue;
 		}
 	default:
@@ -230,7 +302,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		  if (key != TEL_LIST)
 		    continue;
 		  else {
-		    arg1 = strtok(NULL," ");
+		    arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		    continue;
 		  }
 		}
@@ -239,7 +311,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		  if (key != TEL_LIST)
 		    continue;
 		  else {
-		    arg1 = strtok(NULL," ");
+		    arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		    continue;
 		  }
 		}
@@ -257,7 +329,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		  if (key != TEL_LIST)
 		    continue;
 		  else {
-		    arg1 = strtok(NULL," ");
+		    arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		    continue;
 		  }
 		}
@@ -297,7 +369,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		  if (key != TEL_LIST)
 		    continue;
 		  else {
-		    arg1 = strtok(NULL," ");
+		    arg1 = strtok_r(NULL, separgs, &tstrtokr);
 		    continue;
 		  }
 		}
@@ -319,7 +391,7 @@ void do_teleport(dbref player, dbref cause, int key, char *slist,
 		}
 	}
 	if (key == TEL_LIST)
-          arg1 = strtok(NULL," ");
+          arg1 = strtok_r(NULL, separgs, &tstrtokr);
       }
 }
 
@@ -375,7 +447,8 @@ void do_remote(dbref player, dbref cause, int key, char *loc,
     char *command, char *args[], int nargs)
 {
 dbref target;
-char *retbuff;
+char *retbuff, *s_rollback;
+int i_jump, i_rollback;
 
    if ( mudstate.remote != -1 ) {
       notify(player, "You can not nest @remote.");
@@ -387,7 +460,7 @@ char *retbuff;
    if ( !loc || !*loc ) {
       target = NOTHING;
    } else {
-      retbuff = exec(player, cause, cause, EV_EVAL | EV_FCHECK, loc, NULL, 0);
+      retbuff = exec(player, cause, cause, EV_EVAL | EV_FCHECK, loc, (char **)NULL, 0, (char **)NULL, 0);
       target = match_thing(player, retbuff);
       free_lbuf(retbuff);
    }
@@ -397,7 +470,17 @@ char *retbuff;
   }
   mudstate.remote = target;
   mudstate.remotep = player;
-  process_command(player, player, 0, command, args, nargs, 0);
+  s_rollback = alloc_lbuf("s_rollback_remote");
+  strcpy(s_rollback, mudstate.rollback);
+  i_jump = mudstate.jumpst;
+  i_rollback = mudstate.rollbackcnt;
+  mudstate.jumpst = mudstate.rollbackcnt = 0;
+  strcpy(mudstate.rollback, command);
+  process_command(player, player, 0, command, args, nargs, 0, mudstate.no_hook);
+  mudstate.jumpst = i_jump;
+  mudstate.rollbackcnt = i_rollback;
+  strcpy(mudstate.rollback, s_rollback);
+  free_lbuf(s_rollback);
   mudstate.remote = -1;
   mudstate.remotep = -1;
 }
@@ -409,7 +492,7 @@ char *retbuff;
 void do_turtle(dbref player, dbref cause, int key, char *turtle, char *newowner)
 {
 dbref	victim, recipient, loc, aowner, aowner2, newplayer;
-char	*buf, *s_retval, *s_retplayer, *s_retvalbuff, *s_strtok, *s_strtokr, *s_chkattr, *s_buffptr, *s_mbuf;
+char	*buf, *s_retval, *s_retplayer, *s_retvalbuff, *s_strtok, *s_strtokr, *s_chkattr, *s_buffptr, *s_mbuf, *tstrtokr;
 int	count, aflags, aflags2, i, i_array[LIMIT_MAX];
 
 	init_match(player, turtle, TYPE_PLAYER);
@@ -443,9 +526,9 @@ int	count, aflags, aflags2, i, i_array[LIMIT_MAX];
            if ( *s_chkattr ) {
               i_array[0] = i_array[2] = 0;
               i_array[4] = i_array[1] = i_array[3] = -2;
-              for (s_buffptr = (char *) strtok(s_chkattr, " "), i = 0;
+              for (s_buffptr = (char *) strtok_r(s_chkattr, " ", &tstrtokr), i = 0;
                    s_buffptr && (i < LIMIT_MAX);
-                   s_buffptr = (char *) strtok(NULL, " "), i++) {
+                   s_buffptr = (char *) strtok_r(NULL, " ", &tstrtokr), i++) {
                   i_array[i] = atoi(s_buffptr);
               }
               if ( i_array[3] != -1 ) {
@@ -513,7 +596,7 @@ int	count, aflags, aflags2, i, i_array[LIMIT_MAX];
 	if (key & TOAD_NO_CHOWN) {
 		count = -1;
 	} else {
-		count = chown_all(victim, recipient);
+		count = chown_all(victim, recipient, 0);
 		s_Owner(victim, recipient);	/* you get it */
 	}
 	s_Flags(victim, TYPE_THING|HALT);
@@ -584,7 +667,7 @@ int	count, aflags, aflags2, i, i_array[LIMIT_MAX];
 void do_toad(dbref player, dbref cause, int key, char *toad, char *newowner)
 {
 dbref	victim, recipient, loc, aowner, aowner2, newplayer;
-char	*buf, *s_strtok, *s_strtokr, *s_chkattr, *s_buffptr, *s_mbuf;
+char	*buf, *s_strtok, *s_strtokr, *s_chkattr, *s_buffptr, *s_mbuf, *tstrtokr;
 int	count, aflags, i, i_array[LIMIT_MAX], aflags2;
 
 	init_match(player, toad, TYPE_PLAYER);
@@ -629,9 +712,9 @@ int	count, aflags, i, i_array[LIMIT_MAX], aflags2;
            if ( *s_chkattr ) {
               i_array[0] = i_array[2] = 0;
               i_array[4] = i_array[1] = i_array[3] = -2;
-              for (s_buffptr = (char *) strtok(s_chkattr, " "), i = 0;
+              for (s_buffptr = (char *) strtok_r(s_chkattr, " ", &tstrtokr), i = 0;
                    s_buffptr && (i < LIMIT_MAX);
-                   s_buffptr = (char *) strtok(NULL, " "), i++) {
+                   s_buffptr = (char *) strtok_r(NULL, " ", &tstrtokr), i++) {
                   i_array[i] = atoi(s_buffptr);
               }
               if ( i_array[3] != -1 ) {
@@ -671,7 +754,7 @@ int	count, aflags, i, i_array[LIMIT_MAX], aflags2;
 	if (key & TOAD_NO_CHOWN) {
 		count = -1;
 	} else {
-		count = chown_all(victim, recipient);
+		count = chown_all(victim, recipient, 0);
 		s_Owner(victim, recipient);	/* you get it */
 	}
 	s_Flags(victim, TYPE_THING|HALT);
@@ -728,68 +811,71 @@ int	count, aflags, i, i_array[LIMIT_MAX], aflags2;
 void do_newpassword(dbref player, dbref cause, int key, char *name, 
 		char *password)
 {
-dbref	victim;
-char	*buf;
+   dbref victim;
+   char *buf;
 
-	if ((victim = lookup_player(player, name, 0)) == NOTHING) {
-		notify_quiet(player, "No such player.");
-		return;
-	}
+   if ((victim = lookup_player(player, name, 0)) == NOTHING) {
+      notify_quiet(player, "No such player.");
+      return;
+   }
 
-	if (*password != '\0' && !ok_password(password, player, 0)) {
+   if (*password != '\0' && !ok_password(password, player, 0)) {
+      /* Can set null passwords, but not bad passwords */
+      notify_quiet(player, "Bad password");
+      return;
+   }
 
-		/* Can set null passwords, but not bad passwords */
-		notify_quiet(player, "Bad password");
-		return;
-	}
+   if (God(victim) && !God(player) && !(mudconf.newpass_god && Immortal(player))) {
+      notify_quiet(player, "You cannot change that player's password.");
+      return;
+   }
 
-	if (God(victim) && !God(player) && !(mudconf.newpass_god && Immortal(player))) {
-		notify_quiet(player, "You cannot change that player's password.");
-		return;
-	}
-	if (Immortal(victim) && !Immortal(player)) {
-		notify(player, "You cannot change an Immortal's password.");
-		return;
-	}
+   if (Immortal(victim) && !Immortal(player)) {
+      notify(player, "You cannot change an Immortal's password.");
+      return;
+   }
 
-	if (Wizard(victim) && !Immortal(player)) {
-		 notify(player, "You cannot change the password of Royalty.");
-		 return;
-	}
+   if (Wizard(victim) && !Immortal(player)) {
+      notify(player, "You cannot change the password of Royalty.");
+      return;
+   }
 
-	if (Admin(victim) && (player != victim) && !Wizard(player)) {
-		 notify(player, "You cannot change that player's password.");
-		 return;
-	}
+   if (Admin(victim) && (player != victim) && !Wizard(player)) {
+      notify(player, "You cannot change that player's password.");
+      return;
+   }
 
-	if (!Immortal(player) && DePriv(player,NOTHING,DP_PASSWORD,POWER8,POWER_LEVEL_NA)) {
-		notify_quiet(player, "You cannot change that player's password.");
-		return;
-	}
+   if (!Immortal(player) && DePriv(player,NOTHING,DP_PASSWORD,POWER8,POWER_LEVEL_NA)) {
+      notify_quiet(player, "You cannot change that player's password.");
+      return;
+   }
 
-	if (!Immortal(player) && !Immortal(victim)  && DePriv(victim,NOTHING,DP_PASSWORD,POWER8,POWER_LEVEL_NA)) {
-		notify_quiet(player, "You cannot change that player's password.");
-		return;
-	}
+   if (!Immortal(player) && !Immortal(victim)  && DePriv(victim,NOTHING,DP_PASSWORD,POWER8,POWER_LEVEL_NA)) {
+      notify_quiet(player, "You cannot change that player's password.");
+      return;
+   }
 
-	STARTLOG(LOG_WIZARD,"WIZ","PASS")
-		log_name(player);
-		log_text((char *)" changed the password of ");
-		log_name(victim);
-	ENDLOG
+   STARTLOG(LOG_WIZARD,"WIZ","PASS")
+      log_name(player);
+      log_text((char *)" changed the password of ");
+      log_name(victim);
+   ENDLOG
 
-	/* it's ok, do it */
-
-	s_Pass(victim, mush_crypt((const char *)password));
-	buf=alloc_lbuf("do_newpassword");
-	notify_quiet(player, "Password changed.");
-	sprintf(buf, "Your password has been changed by %s.", Name(player));
-	notify_quiet(victim, buf);
-        if ( mudconf.newpass_god && God(victim)) {
-           mudconf.newpass_god = 0;
-           notify(player, "The ability to @newpassword #1 has been automatically disabled.");
-        }
-	free_lbuf(buf);
+   /* it's ok, do it */
+   if ( key & NEWPASSWORD_DES ) {
+      s_Pass(victim, mush_crypt((const char *)password, 1));
+   } else {
+      s_Pass(victim, mush_crypt((const char *)password, 0));
+   }
+   buf = alloc_lbuf("do_newpassword");
+   notify_quiet(player, "Password changed.");
+   sprintf(buf, "Your password has been changed by %s.", Name(player));
+   notify_quiet(victim, buf);
+   if ( mudconf.newpass_god && God(victim)) {
+      mudconf.newpass_god = 0;
+      notify(player, "The ability to @newpassword #1 has been automatically disabled.");
+   }
+   free_lbuf(buf);
 }
 
 void do_conncheck(dbref player, dbref cause, int key)
@@ -819,35 +905,84 @@ void do_conncheck(dbref player, dbref cause, int key)
   }
 }
 
-void do_selfboot(dbref player, dbref cause, int key)
+void do_selfboot(dbref player, dbref cause, int key, char *name)
 {
 time_t	dtime, now;
-int	port, count;
+int	port, count, count2;
+char    *tbuf;
 DESC	*d;
 
   dtime = 0;
   count = 0;
   port = -1;
-  time(&now);
-  DESC_ITER_CONN(d) {
-    if (d->player == player) {
-      if (!count || (now - d->last_time) < dtime) {
-	if (count)
-	  boot_by_port(port,!God(player),player,NULL);
-	dtime = now - d->last_time;
-	port = d->descriptor;
-      }
-      else
-	boot_by_port(d->descriptor,!God(player),player,NULL);
-      count++;
-    }
-  }
-  if (count < 2) {
-    notify(player,"You only have 1 connection.");
-  }
-  else {
-    notify(player,unsafe_tprintf("%d connection(s) closed.", count - 1));
-  }
+  switch (key) {
+     case SELFBOOT_LIST:   /* List ports you have open */
+        tbuf = alloc_lbuf("do_selfboot");
+        sprintf(tbuf, "%-10s %-10s %-10s %s\r\n%s", (char *)"Port", (char *)"Idle",
+                (char *)"Conn", (char *)"Site",
+                (char *)"------------------------------------------------------------------------------");
+        notify(player, tbuf);
+        DESC_ITER_CONN(d) {
+          if (d->player == player) {
+             sprintf(tbuf, "%-10d %-10s %-10s %s", d->descriptor, time_format_1(mudstate.now - d->last_time),
+                     wiz_time_format_2(mudstate.now - d->connected_at), inet_ntoa(d->address.sin_addr));
+             notify(player, tbuf);
+          }
+        }
+        notify(player, (char *)"------------------------------------------------------------------------------");
+        free_lbuf(tbuf);
+        break;
+     case SELFBOOT_PORT:   /* boot specified port */
+        if ( !name || !*name ) {
+           notify(player, "You must specify a port with the /port switch.");
+        } else {
+           port = atoi(name);
+           count = count2 = 0;
+           DESC_ITER_CONN(d) {
+             if ( d->player == player )
+                count2++;
+           }
+          
+           DESC_ITER_CONN(d) {
+             if ( (d->player == player) && (d->descriptor == port) ) {
+                if ( count2 > 1 )
+	           boot_by_port(d->descriptor,!God(player),player,NULL);
+                count++;
+             }
+           }
+           if ( count > 0 ) {
+              if ( count2 <= 1 ) {
+                 notify(player, "You can't boot your only connection.");
+              } else {
+                 notify(player,unsafe_tprintf("%d connection(s) closed.", count));
+              }
+           } else {
+              notify(player, "You do not have a connection from that port.");
+           }
+        }
+        break;
+     default:              /* default behavior */
+        time(&now);
+        DESC_ITER_CONN(d) {
+          if (d->player == player) {
+            if (!count || (now - d->last_time) < dtime) {
+	      if (count)
+	        boot_by_port(port,!God(player),player,NULL);
+	      dtime = now - d->last_time;
+	      port = d->descriptor;
+            } else {
+	      boot_by_port(d->descriptor,!God(player),player,NULL);
+            }
+            count++;
+          }
+        }
+        if (count < 2) {
+          notify(player,"You only have 1 connection.");
+        } else {
+          notify(player,unsafe_tprintf("%d connection(s) closed.", count - 1));
+        }
+        break;
+   }
 }
       
 
@@ -1548,6 +1683,7 @@ void q_lock(dbref who, int key, int qswitch[])
 void quota_lock(dbref player, dbref who, int all, int key, int qswitch[], int qset)
 {
   dbref i;
+  char *tbuf;
 
   if (!all) {
     if (!Controls(player,who)) {
@@ -1574,10 +1710,25 @@ void quota_lock(dbref player, dbref who, int all, int key, int qswitch[], int qs
 	q_lock(i, key, qswitch);
     }
   }
-  if (key == QUOTA_LOCK)
-    notify(player,"Locked.");
-  else
-    notify(player,"Unlocked.");
+  if (key == QUOTA_LOCK) {
+    if ( TogNoisy(player) ) {
+       tbuf = alloc_lbuf("quota_lock");
+       sprintf(tbuf, "Locked - %s/quotalock", Name(player));
+       notify(player, tbuf);
+       free_lbuf(tbuf);
+    } else {
+       notify(player,"Locked.");
+    }
+  } else {
+    if ( TogNoisy(player) ) {
+       tbuf = alloc_lbuf("quota_lock");
+       sprintf(tbuf, "Unlocked - %s/quotalock", Name(player));
+       notify(player, tbuf);
+       free_lbuf(tbuf);
+    } else {
+       notify(player,"Unlocked.");
+    }
+  }
 }
 
 void quota_take(dbref player, dbref who, int key, char *cargs[], int nargs)
@@ -2138,13 +2289,57 @@ void do_convert (dbref player, dbref cause, int key, char *buff1, char *buff2)
   }
   notify(player,"Done.");
 }
+void do_site_buff(dbref player, char *instr, char *label)
+{
+  char *s_tbuff, *s_tprbuff, *s_mybuff, *s_mybufptr, *s_strtok, *s_strtok_r;
+  int i_cntr;
+
+  s_tbuff = alloc_lbuf("do_site_list");
+  s_tprbuff = alloc_lbuf("do_site_list");
+  s_mybufptr = s_mybuff = alloc_lbuf("do_site_buff");
+
+  sprintf(s_tprbuff, "%s ----------", label);
+  safe_str(s_tprbuff, s_mybuff, &s_mybufptr);
+
+  strcpy(s_tbuff, instr);
+  s_strtok =  (char *)strtok_r(s_tbuff, " \t", &s_strtok_r);
+  i_cntr = 0;
+  while ( s_strtok ) {
+     if ( !(i_cntr % 3) ) {
+        safe_str((char *)"\r\n   ", s_mybuff, &s_mybufptr);
+     } 
+     sprintf(s_tprbuff, "%-24s ", s_strtok);
+     safe_str(s_tprbuff, s_mybuff,  &s_mybufptr);
+     s_strtok = strtok_r(NULL, " \t", &s_strtok_r);
+     i_cntr++;
+  }
+  notify(player, s_mybuff);
+  free_lbuf(s_tbuff);
+  free_lbuf(s_tprbuff);
+  free_lbuf(s_mybuff);
+}
 
 void do_site(dbref player, dbref cause, int key, char *buff1, char *buff2)
 {
   SITE *pt1, *pt2;
   struct in_addr addr_num, mask_num;
-  char count;
+  char count; 
   unsigned long maskval;
+
+  if ( key & SITE_LIST ) {
+     do_site_buff(player, mudconf.forbid_host, (char *)"forbid_host");
+     do_site_buff(player, mudconf.forbidapi_host, (char *)"forbidapi_host");
+     do_site_buff(player, mudconf.suspect_host, (char *)"suspect_host");
+     do_site_buff(player, mudconf.register_host, (char *)"register_host");
+     do_site_buff(player, mudconf.noguest_host, (char *)"noguest_host");
+     do_site_buff(player, mudconf.autoreg_host, (char *)"autoreg_host");
+     do_site_buff(player, mudconf.validate_host, (char *)"validate_host");
+     do_site_buff(player, mudconf.goodmail_host, (char *)"goodmail_host");
+     do_site_buff(player, mudconf.nobroadcast_host, (char *)"nobroadcast_host");
+     do_site_buff(player, mudconf.passproxy_host, (char *)"passproxy_host");
+     do_site_buff(player, mudconf.passapi_host, (char *)"passapi_host");
+     return;
+  }
 
   if (!*buff1 || !*buff2 || !key) {
     notify(player,"Bad format in site command");
@@ -2153,7 +2348,7 @@ void do_site(dbref player, dbref cause, int key, char *buff1, char *buff2)
   addr_num.s_addr = inet_addr(buff1);
   if ( strchr(buff2, '/') != NULL ) {
      maskval = atol(buff2+1);
-     if ((maskval < 0) || (maskval > 32)) {
+     if (((long)maskval < 0) || (maskval > 32)) {
         notify(player, "Bad mask in site command");
         return;
      }
@@ -2168,7 +2363,7 @@ void do_site(dbref player, dbref cause, int key, char *buff1, char *buff2)
   count = 0;
 
   /* remove from suspect list */
-  if ((key & SITE_SUS) || (key & SITE_ALL) || (key & SITE_TRU)) {
+  if ((key & SITE_SUS) || (key & SITE_PASSPROX) || (key & SITE_ALL) || (key & SITE_TRU)) {
     pt2 = NULL;
     pt1 = mudstate.suspect_list;
     while (pt1) {
@@ -2256,7 +2451,7 @@ void do_site(dbref player, dbref cause, int key, char *buff1, char *buff2)
     notify(player,"Entry not found in site list");
 }
 
-static int file_select(const struct direct *entry)
+static int file_select(const struct dirent *entry)
 {
    if ( strstr(entry->d_name, ".img") != NULL ) 
       return(1);
@@ -2264,18 +2459,94 @@ static int file_select(const struct direct *entry)
       return(0);
 }
 
+#ifdef NEED_SCANDIR
+/* Some unix systems do not handle scandir -- so we build one for them */
+int
+scandir(const char *directory_name,
+            struct dirent ***array_pointer,
+            int (*select_function)(const struct dirent *),
+            int (*compare_function)(const struct dirent**, const struct dirent**)
+)
+{
+   DIR *directory;
+   struct dirent **array;
+   struct dirent *entry;
+   struct dirent *copy;
+   int allocated = 20;
+   int counter = 0;
+
+   if (directory = opendir (directory_name), directory == NULL)
+      return -1;
+
+   if (array = (struct dirent **)malloc (allocated * sizeof(struct dirent *)), array == NULL)
+      return -1;
+
+   while (entry = readdir(directory), entry)
+      if (select_function == NULL || (*select_function)(entry)) {
+         int namelength = strlen(entry->d_name) + 1;
+         int extra = 0;
+
+         if (sizeof(entry->d_name) <= namelength) {
+            extra += namelength - sizeof(entry->d_name);
+         }
+
+         if (copy = (struct dirent *)malloc(sizeof(struct dirent) + extra), copy == NULL) {
+            closedir(directory);
+            free(array);
+            return -1;
+        }
+        copy->d_ino = entry->d_ino;
+        copy->d_reclen = entry->d_reclen;
+        strcpy(copy->d_name, entry->d_name);
+
+        if (counter + 1 == allocated) {
+           allocated <<= 1;
+           array = (struct dirent **)
+           realloc ((char *)array, allocated * sizeof(struct dirent *));
+           if (array == NULL) {
+              closedir(directory);
+              free(array);
+              free(copy);
+              return -1;
+           }
+        }
+        array[counter++] = copy;
+     }
+     array[counter] = NULL;
+     *array_pointer = array;
+     closedir(directory);
+
+     if (counter > 1 && compare_function)
+        qsort((char *)array, counter, sizeof(struct dirent *),
+	      (int(*)(const void *, const void *))(compare_function));
+
+     return counter;
+}
+#endif
+
 void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
 {
    struct dirent **namelist;
-   char *tpr_buff, *tprp_buff, *s_mbname, *s_pt;
+   char *tpr_buff, *tprp_buff, *s_mbname, *s_pt, *s_name, *s_alias, *s_aliastmp;
+   char *s_strtok, *s_strtokptr, *tpr_buff2, *tprp_buff2, *tpr_buff3, *tprp_buff3;
    FILE *f_snap;
-   int i_dirnums, i_flag, i_count;
-   dbref thing;
+   int i_dirnums, i_flag, i_count, i_player, i_connect, aflags;
+   int i_found1, i_found2, i_found3, i_over;
+   dbref thing, aowner;
 
-   i_flag = i_count = 0;
-   switch (key ) {
+   i_flag = i_count = i_over = 0;
+   /* Overwrite file if exists */
+   if ( key & SNAPSHOT_OVER ) {
+      key &= ~SNAPSHOT_OVER;
+      i_over = 1;
+   } 
+   switch ( key ) {
       case SNAPSHOT_NOOPT:
       case SNAPSHOT_LIST: 
+         if ( i_over ) {
+            notify(player, "Invalid switch combination.");
+            return;
+         }
          i_dirnums = scandir(mudconf.image_dir, &namelist, file_select, alphasort);
          if (i_dirnums < 0) {
             tprp_buff = tpr_buff = alloc_lbuf("do_snapshot");
@@ -2301,6 +2572,91 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
             free_lbuf(tpr_buff);
          }
       break;
+      case SNAPSHOT_UNALL:
+         if ( !buff1 || !*buff1 ) {
+            notify(player, "Please specify a target to @snapshot.");
+            return;
+         }
+         if ( buff2 && *buff2 ) {
+            notify(player, "@snapshot/unall does not take target name as an argument.");
+            return;
+         }
+         s_strtok = strtok_r(buff1, " \t", &s_strtokptr);
+         if ( !s_strtok || !*s_strtok ) {
+            notify(player, "Please specify a target to @snapshot.");
+            return;
+         }
+         tprp_buff  = tpr_buff  = alloc_lbuf("do_snapshot_unall1");
+         tprp_buff2 = tpr_buff2 = alloc_lbuf("do_snapshot_unall2");
+         tprp_buff3 = tpr_buff3 = alloc_lbuf("do_snapshot_unall3");
+         s_mbname = alloc_mbuf("do_snapshot_unall");
+         i_found1 = i_found2 = i_found3 = 0;
+         notify(player, "@snapshot: Writing image file(s) ...");
+         while ( s_strtok ) {
+            init_match(player, s_strtok, NOTYPE);
+            match_everything(0);
+            thing = match_result();
+            if ( !Good_chk(thing) ) {
+               if ( i_found1 ) {
+                  safe_chr(' ', tpr_buff, &tprp_buff);
+               } else {
+                  safe_str((char *)"   -> Invalid target @snapshots for: ", tpr_buff, &tprp_buff);
+               }
+               safe_str(s_strtok, tpr_buff, &tprp_buff);
+               s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+               i_found1++;
+               continue;
+            }
+            sprintf(s_mbname, "%s/%d.img", mudconf.image_dir, thing);
+            if ( !i_over && ((f_snap = fopen(s_mbname, "r")) != NULL) ) {
+               if ( i_found2 ) {
+                  safe_chr(' ', tpr_buff2, &tprp_buff2);
+               } else {
+                  safe_str((char *)"   -> Unable to save @snapshots for: ", tpr_buff2, &tprp_buff2);
+               }
+               safe_str(s_strtok, tpr_buff2, &tprp_buff2);
+               fclose(f_snap);
+               s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+               i_found2++;
+               continue;
+            }
+            if ( (f_snap = fopen(s_mbname, "w")) == NULL ) {
+               if ( i_found2 ) {
+                  safe_chr(' ', tpr_buff2, &tprp_buff2);
+               } else {
+                  safe_str((char *)"   -> Unable to save @snapshots for: ", tpr_buff2, &tprp_buff2);
+               }
+               safe_str(s_strtok, tpr_buff2, &tprp_buff2);
+               s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+               i_found2++;
+               continue;
+            }
+            remote_write_obj(f_snap, thing, F_MUSH, OUTPUT_VERSION | UNLOAD_OUTFLAGS);
+            if ( i_found3 ) {
+               safe_chr(' ', tpr_buff3, &tprp_buff3);
+            } else {
+               safe_str((char *)"   -> Unloaded fresh @snapshots for: ", tpr_buff3, &tprp_buff3);
+            }
+            safe_str(s_strtok, tpr_buff3, &tprp_buff3);
+            s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+            i_found3++;
+            fclose(f_snap);
+         }
+         if ( i_found1 ) {
+            notify(player, tpr_buff);
+         }
+         if ( i_found2 ) {
+            notify(player, tpr_buff2);
+         }
+         if ( i_found3 ) {
+            notify(player, tpr_buff3);
+         }
+         notify(player, "@snapshot: Completed.");
+         free_lbuf(tpr_buff);
+         free_lbuf(tpr_buff2);
+         free_lbuf(tpr_buff3);
+         free_mbuf(s_mbname);
+      break;
       case SNAPSHOT_UNLOAD:
          init_match(player, buff1, NOTYPE);
          match_everything(0);
@@ -2322,6 +2678,9 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
                 }
                 s_pt++;
             }
+            if ( strstr(buff2, ".img") != NULL ) {
+               i_count = 1;
+            }
             if ( i_count ) {
                notify(player, "Invalid characters specified in filename.");
                free_mbuf(s_mbname);
@@ -2330,7 +2689,7 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
                sprintf(s_mbname, "%s/%d_%.60s.img", mudconf.image_dir, thing, strip_all_special(buff2));
             }
          }
-         if ( (f_snap = fopen(s_mbname, "r")) != NULL ) {
+         if ( !i_over && ((f_snap = fopen(s_mbname, "r")) != NULL) ) {
             notify(player, "Filename already exists.  Please delete it first.");
             fclose(f_snap);
             free_mbuf(s_mbname);
@@ -2350,29 +2709,86 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
          notify(player, "@snapshot: Completed.");
       break;
       case SNAPSHOT_DEL:
-         s_mbname = alloc_mbuf("do_snapshot");
+         if ( i_over ) {
+            notify(player, "Invalid switch combination.");
+            return;
+         }
          if ( !buff1 || !*buff1 ) {
             notify(player, "Please specify a file to delete.");
-            free_mbuf(s_mbname);
-            return;
-         } else if ( strstr(buff1, ".img") != NULL ) {
-            notify(player, "Please do not specify the .img extension.");
-            free_mbuf(s_mbname);
-            return;
-         } else {
-            sprintf(s_mbname, "%s/%.80s.img", mudconf.image_dir, strip_all_special(buff1));
-         }
-         if ( (f_snap = fopen(s_mbname, "r")) == NULL ) {
-            notify(player, "Filename specified not found.");
-            free_mbuf(s_mbname);
             return;
          }
-         fclose(f_snap);
-         remove(s_mbname);
+         if ( buff2 && *buff2 ) {
+            notify(player, "@snapshot/delete does not take a second argument.");
+            return;
+         }
+         s_strtok = strtok_r(buff1, " \t", &s_strtokptr);
+         if ( !s_strtok || !*s_strtok ) {
+            notify(player, "Please specify a file to delete.");
+            return;
+         }
+         tprp_buff  = tpr_buff  = alloc_lbuf("do_snapshot_unall1");
+         tprp_buff2 = tpr_buff2 = alloc_lbuf("do_snapshot_unall2");
+         tprp_buff3 = tpr_buff3 = alloc_lbuf("do_snapshot_unall3");
+         s_mbname = alloc_mbuf("do_snapshot");
+         i_found1 = i_found2 = i_found3 = 0;
+         notify(player, "@snapshot: Deleting image file(s) ...");
+         while ( s_strtok ) {
+            if ( strstr(s_strtok, ".img") != NULL ) {
+               if ( i_found1 ) {
+                  safe_chr(' ', tpr_buff, &tprp_buff);
+               } else {
+                  safe_str((char *)"   -> Files skipped with .img extension: ", tpr_buff, &tprp_buff);
+               }
+               i_found1++;
+               safe_str(s_strtok, tpr_buff, &tprp_buff);
+               s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+               continue;
+            } else {
+               sprintf(s_mbname, "%s/%.80s.img", mudconf.image_dir, strip_all_special(s_strtok));
+            }
+            if ( (f_snap = fopen(s_mbname, "r")) == NULL ) {
+               if ( i_found2 ) {
+                  safe_chr(' ', tpr_buff2, &tprp_buff2);
+               } else {
+                  safe_str((char *)"   -> Files skipped as not found: ", tpr_buff2, &tprp_buff2);
+               }
+               i_found2++;
+               safe_str(s_strtok, tpr_buff2, &tprp_buff2);
+               s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+               continue;
+            }
+            fclose(f_snap);
+            remove(s_mbname);
+            if ( i_found3 ) {
+               safe_chr(' ', tpr_buff3, &tprp_buff3);
+            } else {
+               safe_str((char *)"   -> Files successfully deleted: ", tpr_buff3, &tprp_buff3);
+            }
+            i_found3++;
+            safe_str(s_strtok, tpr_buff3, &tprp_buff3);
+            s_strtok = strtok_r(NULL, " \t", &s_strtokptr);
+            continue;
+         }
+         if ( i_found1 ) {
+            notify(player, tpr_buff);
+         }
+         if ( i_found2 ) {
+            notify(player, tpr_buff2);
+         }
+         if ( i_found3 ) {
+            notify(player, tpr_buff3);
+         }
+         notify(player, "@snapshot: Completed.");
+         free_lbuf(tpr_buff);
+         free_lbuf(tpr_buff2);
+         free_lbuf(tpr_buff3);
          free_mbuf(s_mbname);
-         notify(player, "@snapshot: Snapshot file has been deleted.");
       break;
       case SNAPSHOT_LOAD:
+         if ( i_over ) {
+            notify(player, "Invalid switch combination.");
+            return;
+         }
          init_match(player, buff1, NOTYPE);
          match_everything(0);
          thing = noisy_match_result();
@@ -2387,9 +2803,42 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
             free_mbuf(s_mbname);
             return;
          }
+         i_connect = i_player = 0;
+         if ( isPlayer(thing) ) {
+            i_player = 1;
+            if ( Connected(thing) ) {
+               i_connect = 1;
+            }
+         }
          tprp_buff = tpr_buff = alloc_lbuf("do_snapshot");
          notify(player, safe_tprintf(tpr_buff, &tprp_buff, "@snapshot: Reading image file %s onto #%d...", s_mbname, thing));
+         /* We need to clear their old alias... just in case */
+         if ( i_player ) {
+            s_name = alloc_lbuf("@snapshot_name");
+            s_alias = alloc_lbuf("@snapshot_alias");
+            sprintf(s_name, "#%d", thing);
+            do_alias(GOD, 1, 0, s_name, s_alias);
+            free_lbuf(s_name);
+            free_lbuf(s_alias);
+         }
          i_dirnums = remote_read_obj(f_snap, thing, F_MUSH, OUTPUT_VERSION | UNLOAD_OUTFLAGS, &i_count);
+         /* Now we can set their new alias and reset their connect flag */
+         if ( i_player ) {
+            s_name = alloc_lbuf("@snapshot_name");
+            sprintf(s_name, "#%d", thing);
+            s_alias = atr_get(thing, A_ALIAS, &aowner, &aflags);
+            if ( s_alias && *s_alias ) {
+               s_aliastmp = alloc_lbuf("@snapshot_aliastmp");
+               do_alias(GOD, GOD, 0, s_name, s_aliastmp);
+               do_alias(GOD, GOD, 0, s_name, s_alias);
+               free_lbuf(s_aliastmp);
+            }
+            if ( i_connect ) {
+               s_Connected(thing);
+            }
+            free_lbuf(s_name);
+            free_lbuf(s_alias);
+         }
          fclose(f_snap);
          switch (i_dirnums) {
             case 0: 
@@ -2425,6 +2874,10 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
          free_lbuf(tpr_buff);
       break;
       case SNAPSHOT_VERIFY:
+         if ( i_over ) {
+            notify(player, "Invalid switch combination.");
+            return;
+         }
          s_mbname = alloc_mbuf("do_snapshot_verify");
          if ( !buff1 || !*buff1 ) {
             notify(player, "Please specify a file to verify.");
@@ -2454,3 +2907,193 @@ void do_snapshot(dbref player, dbref cause, int key, char *buff1, char *buff2)
       break;
    }   
 }
+
+/* The main command interface for setting up and configuring API */
+void do_api(dbref player, dbref cause, int key, char *s_target, char *s_string)
+{
+   ATTR *atr;
+   char *s_buff, *s_tmp, *s_tmpptr, *s_text;
+   int aflags, i_flag, anum;
+   dbref aowner, thing;
+
+   init_match(player, s_target, NOTYPE);
+   match_everything(0);
+   thing = noisy_match_result();
+   if ( !Good_chk(thing) ) {
+      notify(player, "Invalid dbref# specified for @api.");
+      return;
+   }
+   
+   s_tmpptr = s_tmp = alloc_lbuf("do_api");
+   s_buff = alloc_lbuf("do_api_buff");
+   switch (key) {
+      case API_STATUS:  /* Status of target */
+      default:
+         notify(player, safe_tprintf(s_tmp, &s_tmpptr, "@api: Status of %s(#%d):", Name(thing), thing));
+         if ( HasPriv(thing, NOTHING, POWER_API, POWER5, NOTHING) ) {
+#ifdef ZENTY_ANSI
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Access (@power API): %sENABLED%s", SAFE_ANSI_GREEN, SAFE_ANSI_NORMAL));
+#else
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Access (@power API): %sENABLED%s", ANSI_GREEN, ANSI_NORMAL));
+#endif
+         } else {
+#ifdef ZENTY_ANSI
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Access (@power API): %sDISABLED%s", SAFE_ANSI_RED, SAFE_ANSI_NORMAL));
+#else
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Access (@power API): %sDISABLED%s", ANSI_RED, ANSI_NORMAL));
+#endif
+         }
+
+         /* Validate the password field */
+         atr = atr_str("_APIPASSWD");
+         i_flag = 0;
+         if ( !atr ) {
+            i_flag = 1;
+         } else {
+            s_text = atr_get(thing, atr->number, &aowner, &aflags);
+            if ( !*s_text ) {
+               i_flag = 1;
+               free_lbuf(s_text);
+            }
+         }
+         if ( !i_flag ) {
+#ifdef ZENTY_ANSI
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Password (_APIPASSWD): %sSET%s", SAFE_ANSI_GREEN, SAFE_ANSI_NORMAL));
+#else
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Password (_APIPASSWD): %sSET%s", ANSI_GREEN, ANSI_NORMAL));
+#endif
+            free_lbuf(s_text);
+         } else {
+#ifdef ZENTY_ANSI
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Password (_APIPASSWD): %sUNSET%s", SAFE_ANSI_RED, SAFE_ANSI_NORMAL));
+#else
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API Password (_APIPASSWD): %sUNSET%s", ANSI_RED, ANSI_NORMAL));
+#endif
+         }
+
+         /* Validate the optional IP field */
+         atr = atr_str("_APIIP");
+         i_flag = 0;
+         if ( !atr ) {
+            i_flag = 1;
+         } else {
+            s_text = atr_get(thing, atr->number, &aowner, &aflags);
+            if ( !*s_text ) {
+               i_flag = 1;
+               free_lbuf(s_text);
+            }
+         }
+         if ( !i_flag ) {
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API IP Allowed (_APIIP): %s", s_text));
+            free_lbuf(s_text);
+         } else {
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "  --> API IP Allowed (_APIIP): 127.0.0.1 only (default)", s_text));
+         }
+         break;
+
+      case API_PASSWORD:
+         if ( *s_string && !ok_password(s_string, player, 0) ) {
+            notify(player, safe_tprintf(s_tmp, &s_tmpptr, "@api: Invalid password specified: %s", s_string));
+         } else {
+            sprintf(s_buff, "%s", (char *)"_APIPASSWD");
+            anum = mkattr(s_buff);
+            i_flag = 0;
+            if ( anum < 0 ) {
+               i_flag = 1;
+            } else {
+               atr = atr_num(anum);
+               if ( !atr ) {
+                  i_flag = 1;
+               } else {
+                  if ( !*s_string ) {
+                     atr_clr(thing, atr->number);
+                     notify(player, "@api: Password cleared");
+                  } else {
+                     atr_add_raw(thing, atr->number, mush_crypt(s_string, 0));
+                     notify(player, "@api: Password set");
+                  }
+               }
+            }
+            if ( i_flag ) {
+               notify(player, "@api: Unable to set the password attribute!");
+            }
+         }
+         break;
+
+      case API_CHKPASSWD:
+         atr = atr_str("_APIPASSWD");
+         i_flag = 0;
+         if ( !atr ) {
+            i_flag = 2;
+         } else {
+            s_text = atr_get(thing, atr->number, &aowner, &aflags);
+            if ( !*s_text ) {
+               i_flag = 2;
+               free_lbuf(s_text);
+            }
+         }
+         if ( !i_flag ) {
+            if ( *s_string && mush_crypt_validate(thing, s_string, s_text, 0)) {
+               notify(player, "@api: Password matched.");
+            } else {
+               i_flag = 1;
+            }
+            free_lbuf(s_text);
+         }
+         if ( i_flag == 2 ) {
+            notify(player, "@api: Password is not currently set.");
+         }
+         if ( i_flag == 1 ) {
+            notify(player, "@api: Password did not match.");
+         }
+         break;
+
+      case API_IP:
+         sprintf(s_buff, "%s", (char *)"_APIIP");
+         anum = mkattr(s_buff);
+         i_flag = 0;
+         if ( anum < 0 ) {
+            i_flag = 1;
+         } else {
+            atr = atr_num(anum);
+            if ( !atr ) {
+               i_flag = 1;
+            } else {
+               if ( !*s_string ) {
+                  atr_clr(thing, atr->number);
+                  notify(player, "@api: IP allow list cleared and reset to localhost (127.0.0.1)");
+               } else {
+                  atr_add_raw(thing, atr->number, s_string);
+                  notify(player, "@api: IP allow list set");
+               }
+            }
+            if ( i_flag ) {
+               notify(player, "@api: Unable to set the IP attribute!");
+            }
+         }
+         break;
+
+      case API_ENABLE:
+         if ( !HasPriv(thing, NOTHING, POWER_API, POWER5, NOTHING) ) {
+            sprintf(s_buff, "%s", (char *)"API");
+            power_set(thing, GOD, s_buff, POWER_LEVEL_COUNC);
+            notify(player, "@api: Target is now allowed to process API handling");
+         } else {
+            notify(player, "@api: Target is already enabled for API handling");
+         }
+         break;
+
+      case API_DISABLE:
+         if ( HasPriv(thing, NOTHING, POWER_API, POWER5, NOTHING) ) {
+            sprintf(s_buff, "%s", (char *)"API");
+            power_set(thing, GOD, s_buff, POWER_LEVEL_OFF);
+            notify(player, "@api: Target is no longer allowed to process API handling");
+         } else {
+            notify(player, "@api: Target is already disabled from API handling");
+         }
+         break;
+   }
+   free_lbuf(s_buff);
+   free_lbuf(s_tmp);
+}
+

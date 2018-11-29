@@ -352,7 +352,7 @@ move_object(dbref thing, dbref dest)
 
     /* Look around and do the penny check */
 
-    look_in(thing, dest, (LK_SHOWEXIT | LK_OBEYTERSE));
+    look_in(thing, thing, dest, (LK_SHOWEXIT | LK_OBEYTERSE));
     if (isPlayer(thing) &&
 	(mudconf.payfind > 0) &&
 	(Pennies(thing) < mudconf.paylimit) &&
@@ -538,7 +538,7 @@ move_via_teleport(dbref thing, dbref dest, dbref cause, int hush, int quiet)
 	for (count = mudconf.ntfy_nest_lim; count > 0; count--) {
 	    if (!could_doit(cause, curr, A_LTELOUT,1,0) && (!Controls(cause, curr) ||
 	      DePriv(cause, NOTHING, DP_OVERRIDE, POWER7, POWER_LEVEL_NA) ||
-              NoOverride(cause) || !(mudconf.wiz_override) ||
+              NoOverride(cause) || !(mudconf.wiz_override) || (mudstate.remotep != NOTHING) ||
 		   DePriv(cause, Owner(curr), DP_LOCKS, POWER6, NOTHING))) {
 		if ((thing == cause) || (cause == NOTHING))
 		    failmsg = (char *)
@@ -561,6 +561,11 @@ move_via_teleport(dbref thing, dbref dest, dbref cause, int hush, int quiet)
 	      break;
 	}
     }
+    if ( mudstate.remotep != NOTHING ) {
+       notify_quiet(thing, "Can't teleport via remote.");
+       return 0;
+    }
+
     if ((dest == HOME) && !isExit(thing))
 	dest = Home(thing);
     if ((dest != NOTHING) && (!Good_obj(dest) || Going(dest) || Recover(dest))) {
@@ -621,9 +626,14 @@ move_exit(dbref player, dbref exit, int divest, const char *failmsg,
 	  int hush)
 {
     dbref loc, aowner;
-    int oattr, aattr, x, aflags;
-    char *retbuff, *atext, *savereg[MAX_GLOBAL_REGS], *pt;
+    int oattr, aattr, x, aflags, chk_tog;
+    time_t chk_stop;
+    char *retbuff, *atext, *savereg[MAX_GLOBAL_REGS], *pt, *saveregname[MAX_GLOBAL_REGS], *npt;
 
+    if ( mudstate.remotep != NOTHING ) {
+       notify(player, "You can't go that way by remote.");
+       return;
+    }
     oattr = aattr = 0;
     loc = Location(exit);
     if (loc == HOME)
@@ -631,14 +641,19 @@ move_exit(dbref player, dbref exit, int divest, const char *failmsg,
     if ( VariableExit(exit) && !mudstate.chkcpu_toggle ) {
        atext = atr_pget(exit, A_EXITTO, &aowner, &aflags);
        if ( *atext ) {
+          chk_stop = mudstate.chkcpu_stopper;
+          chk_tog = mudstate.chkcpu_toggle;
           mudstate.chkcpu_stopper = time(NULL);
           mudstate.chkcpu_toggle = 0;
           for (x = 0; x < MAX_GLOBAL_REGS; x++) {
              savereg[x] = alloc_lbuf("ulocal_reg_moveexit");
+             saveregname[x] = alloc_sbuf("ulocal_regname_moveexit");
              pt = savereg[x];
+             npt = saveregname[x];
              safe_str(mudstate.global_regs[x],savereg[x],&pt);
+             safe_str(mudstate.global_regsname[x],saveregname[x],&npt);
           }
-          retbuff = exec(exit, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, atext, (char **) NULL, 0);
+          retbuff = cpuexec(exit, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, atext, (char **) NULL, 0, (char **)NULL, 0);
           if ( !*retbuff ) {
              loc = NOTHING;
           } else if ( *retbuff && (stricmp(retbuff, "home") == 0) ) {
@@ -647,7 +662,9 @@ move_exit(dbref player, dbref exit, int divest, const char *failmsg,
              if ( (strlen(retbuff) > 1) && (*retbuff == NUMBER_TOKEN) ) {
                 loc = parse_dbref(retbuff+1);
                 if ( !Good_obj(loc) || Recover(loc) || Going(loc) || !Linkable(Owner(exit), loc) ) {
-                   loc = NOTHING;
+                   if ( Good_obj(loc) && !HasPriv(exit,NOTHING,POWER_FULLTEL_ANYWHERE,POWER5,POWER_LEVEL_NA) ) {
+                      loc = NOTHING;
+                   }
                 }
              } else {
                 loc = NOTHING;
@@ -656,9 +673,14 @@ move_exit(dbref player, dbref exit, int divest, const char *failmsg,
           free_lbuf(retbuff);
           for (x = 0; x < MAX_GLOBAL_REGS; x++) {
              pt = mudstate.global_regs[x];
+             npt = mudstate.global_regsname[x];
              safe_str(savereg[x],mudstate.global_regs[x],&pt);
+             safe_str(saveregname[x],mudstate.global_regsname[x],&npt);
              free_lbuf(savereg[x]);
+             free_sbuf(saveregname[x]);
           }
+          mudstate.chkcpu_stopper = chk_stop;
+          mudstate.chkcpu_toggle = chk_tog;
        } else {
           loc = NOTHING;
        }
@@ -734,6 +756,10 @@ do_move(dbref player, dbref cause, int key, char *direction)
     char *tpr_buff, *tprp_buff;
 
     if ((!Fubar(player) && !(Flags3(player) & NOMOVE)) || (Wizard(cause))) {
+        if ( (mudstate.remotep != NOTHING) || (mudstate.remote != NOTHING) ) {
+            notify(player, "You can't move there.");
+            return;
+        }
 	if (!string_compare(direction, "home") &&
             !(Flags2(player) & NO_TEL) &&
             !(cmdtest(player, "home")) &&
@@ -816,6 +842,7 @@ do_get(dbref player, dbref cause, int key, char *what)
     }
     /* Look for the thing locally */
 
+
     init_match_check_keys(player, what, TYPE_THING);
     match_neighbor();
     match_exit();
@@ -839,6 +866,11 @@ do_get(dbref player, dbref cause, int key, char *what)
 
     if (((Flags3(thing) & NOMOVE) || (Flags2(thing) & FUBAR)) && !Wizard(player)) {
 	notify(player, "Permission denied.");
+	return;
+    }
+
+    if ( (mudstate.remotep != NOTHING) || (mudstate.remote != NOTHING) ) {
+        notify(player, "You can't get that here.");
 	return;
     }
 
@@ -966,6 +998,10 @@ do_drop(dbref player, dbref cause, int key, char *name)
 	notify(player, "I don't know which you mean!");
 	return;
     }
+    if ( (mudstate.remotep != NOTHING) || (mudstate.remote != NOTHING) ) {
+        notify(player, "You can't drop that here.");
+	return;
+    }
 /*  if (Cloak(thing) && !Controls(player,thing)) */
     if ((SCloak(thing) && Cloak(thing) && !Immortal(player)) || (Cloak(thing) && !Wizard(player))) {
 	thing = NOTHING;
@@ -1052,6 +1088,10 @@ do_enter_internal(dbref player, dbref thing, int quiet)
     dbref loc;
     int oattr, aattr;
 
+    if ( mudstate.remotep != NOTHING ) {
+       notify(player, "You can't enter by remote.");
+       return;
+    }
     if (!Enter_ok(thing) && !controls(player, thing)) {
 	oattr = quiet ? 0 : A_OEFAIL;
 	aattr = quiet ? 0 : A_AEFAIL;
@@ -1087,7 +1127,7 @@ do_enter(dbref player, dbref cause, int key, char *what)
     if ((thing = noisy_match_result()) == NOTHING)
 	return;
 
-    if (Flags3(player) & NOMOVE) {
+    if ( (Flags3(player) & NOMOVE) || (mudstate.remotep != NOTHING) ) {
 	notify(player,"Permission denied.");
 	return;
     }
@@ -1117,7 +1157,7 @@ do_leave(dbref player, dbref cause, int key)
 	notify(player, "You can't leave.");
 	return;
     }
-    if (Flags3(player) & NOMOVE) {
+    if ( (Flags3(player) & NOMOVE) || (mudstate.remotep != NOTHING) ) {
 	notify(player, "Permission denied.");
 	return;
     }

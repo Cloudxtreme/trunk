@@ -195,14 +195,21 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
   pcre *re;
   pcre_extra *study = NULL;
   const char *errptr;
-  char *start, *abuf, *prebuf, *prep, *postbuf, *postp, *str, *obuf,
-       *mybuff, *mybuffptr, tmp;
-  int subpatterns, offsets[99], erroffset, flags, all,
-      match_offset, len, i, p, loop;
+  char *start, *abufptr, *abuf, *prebuf, *prep, *postbuf, *postp, *str, 
+       *obufptr, *obuf, *obuf2, *mybuff, *mybuffptr, tmp, *sregs[100];
+  int subpatterns, offsets[99], erroffset, flags, all, i_key,
+      match_offset, len, i, p, loop, j;
+  time_t t_now, t_later;
 
   flags = all = match_offset = 0;
 
-  flags = 0;
+  i_key = flags = 0;
+
+  if ( key == 8 ) {
+     key = 3;
+     i_key = 8;
+  }
+
   if ( key & 1 )
     flags = PCRE_CASELESS;
 
@@ -211,23 +218,40 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
 
   prep = prebuf = alloc_lbuf("do_regedit_prebuf");
   postp = postbuf = alloc_lbuf("do_regedit_postbuf");
+  if ( i_key == 8 ) {
+     abuf = alloc_lbuf("do_regedit");
+     strcpy(abuf, fargs[0]);
+  } else {
   abuf = exec(player, cause, caller,
-              EV_STRIP | EV_FCHECK | EV_EVAL, fargs[0], cargs, ncargs);
+              EV_STRIP | EV_FCHECK | EV_EVAL, fargs[0], cargs, ncargs, (char **)NULL, 0);
+  }
   safe_str(strip_ansi(abuf), postbuf, &postp);
   free_lbuf(abuf);
 
+  t_now = time(NULL);
   for (i = 1; i < nfargs - 1; i += 2) {
+    if ( mudstate.chkcpu_toggle )
+       break;
     postp = postbuf;
     prep = prebuf;
     /* old postbuf is new prebuf */
     safe_str(postbuf, prebuf, &prep);
-    abuf = exec(player, cause, caller,
-                EV_STRIP | EV_FCHECK | EV_EVAL, fargs[i], cargs, ncargs);
+    if ( i_key == 8 ) {
+       abuf = alloc_lbuf("do_regedit");
+       strcpy(abuf, fargs[i]);
+    } else {
+       abuf = exec(player, cause, caller,
+                   EV_STRIP | EV_FCHECK | EV_EVAL, fargs[i], cargs, ncargs, (char **)NULL, 0);
+    }
 
     if ((re = pcre_compile(abuf, flags, &errptr, &erroffset, tables)) == NULL) {
-      /* Matching error. */
-      safe_str("#-1 REGEXP ERROR: ", buff, bufcx);
-      safe_str((char *)errptr, buff, bufcx);
+      if ( i_key == 8 ) {
+         safe_str(postbuf, buff, bufcx);
+      } else {
+         /* Matching error. */
+         safe_str("#-1 REGEXP ERROR: ", buff, bufcx);
+         safe_str((char *)errptr, buff, bufcx);
+      }
       free_lbuf(abuf);
       free_lbuf(prebuf);
       free_lbuf(postbuf);
@@ -238,8 +262,12 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
       study = pcre_study(re, 0, &errptr);
       if (errptr != NULL) {
         free(re);
-        safe_str("#-1 REGEXP ERROR: ", buff, bufcx);
-        safe_str((char *)errptr, buff, bufcx);
+        if ( i_key == 8 ) {
+           safe_str(postbuf, buff, bufcx);
+        } else {
+           safe_str("#-1 REGEXP ERROR: ", buff, bufcx);
+           safe_str((char *)errptr, buff, bufcx);
+        }
         free_lbuf(prebuf);
         free_lbuf(postbuf);
         return;
@@ -257,9 +285,14 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
         free(study);
       continue;
     }
-
     do {
+      t_later = time(NULL);
       /* Copy up to the start of the matched area */
+      if ( t_later > (t_now + 5) ) {
+         mudstate.chkcpu_toggle = 1;
+      }
+      if ( mudstate.chkcpu_toggle )
+         break;
       tmp = prebuf[offsets[0]];
       prebuf[offsets[0]] = '\0';
       safe_str(start, postbuf, &postp);
@@ -299,8 +332,7 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
               if (p >= re_subpatterns || re_offsets == NULL || re_from == NULL)
                  break;
          
-              pcre_copy_substring(re_from, re_offsets, re_subpatterns, p, obuf,
-                                  LBUF_SIZE);
+              sprintf(obuf, "%c$%d$", '%', p);
               safe_str(obuf, mybuff, &mybuffptr);
               break;
             }
@@ -311,20 +343,52 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
             }
          } /* While *str */
          *mybuffptr = '\0';
-         if ( key & 4 ) {
-            safe_str(mybuff, postbuf, &postp);
+         if ( key & 4 ) { 
+            memset(obuf, '\0', LBUF_SIZE);
+            abufptr = mybuff;
+            obufptr = obuf;
+            obuf2 = alloc_lbuf("pcre_edit_crap");
+            while ( *abufptr ) { 
+               if ( *abufptr == '%' && *(abufptr+1) == '$' ) {
+                  abufptr+=2;
+                  p = atoi(abufptr);
+                  while ( *abufptr && *abufptr != '$' )
+                     abufptr++;
+                  pcre_copy_substring(re_from, re_offsets, re_subpatterns, p, obuf2,
+                                      LBUF_SIZE);
+                  safe_str(obuf2, obuf, &obufptr);
+               } else {
+                  safe_chr(*abufptr, obuf, &obufptr);
+               }
+               abufptr++;
+            }            
+            free_lbuf(obuf2);
+            safe_str(obuf, postbuf, &postp);
          } else {
+            for ( j = 0; j < 100; j++ ) {
+               sregs[j] = NULL;
+               if ( j < re_subpatterns ) {
+                  sregs[j] = alloc_lbuf("regexp_crap");
+                  pcre_copy_substring(re_from, re_offsets, re_subpatterns, j, sregs[j],
+                                      LBUF_SIZE);
+               }
+            }
             abuf = exec(player, cause, caller,
-                        EV_STRIP | EV_FCHECK | EV_EVAL, mybuff, cargs, ncargs);
+                        EV_STRIP | EV_FCHECK | EV_EVAL, mybuff, cargs, ncargs, sregs, re_subpatterns);
+            for ( j = 0; j < re_subpatterns; j++ ) {
+               if ( j >= 100 )
+                  break;
+               free_lbuf(sregs[j]);
+            }
             safe_str(abuf, postbuf, &postp);
             free_lbuf(abuf);
-         }
+         } 
       } else {
          if ( key & 4 ) {
             safe_str(fargs[i+1], postbuf, &postp);
          } else {
             abuf = exec(player, cause, caller,
-                        EV_STRIP | EV_FCHECK | EV_EVAL, fargs[i+1], cargs, ncargs);
+                        EV_STRIP | EV_FCHECK | EV_EVAL, fargs[i+1], cargs, ncargs, (char **)NULL, 0);
             safe_str(abuf, postbuf, &postp);
             free_lbuf(abuf);
          }
@@ -365,49 +429,89 @@ do_regedit(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
 
 FUNCTION(fun_regedit)
 {
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 0);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDIT) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 0);
+   }
 }
 
 FUNCTION(fun_regediti)
 {
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 1);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITI) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 1);
+   }
 }
 
 FUNCTION(fun_regeditall)
 {
-   if (!fn_range_check("REGEDITALL", nfargs, 3, MAX_ARGS, buff, bufcx))
-      return;
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 2);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITALL) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 2);
+   }
 }
 
 FUNCTION(fun_regeditalli)
 {
-   if (!fn_range_check("REGEDITALLI", nfargs, 3, MAX_ARGS, buff, bufcx))
-      return;
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 3);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITALLI) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 3);
+   }
 }
 FUNCTION(fun_regeditlit)
 {
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 4);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITLIT) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 4);
+   }
 }
 
 FUNCTION(fun_regeditilit)
 {
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 5);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITLITI) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 5);
+   }
 }
 
 FUNCTION(fun_regeditalllit)
 {
-   if (!fn_range_check("REGEDITALL", nfargs, 3, MAX_ARGS, buff, bufcx))
-      return;
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 6);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITALLLIT) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 6);
+   }
 }
 
 FUNCTION(fun_regeditallilit)
 {
-   if (!fn_range_check("REGEDITALLI", nfargs, 3, MAX_ARGS, buff, bufcx))
-      return;
-   do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 7);
+   if ( nfargs < 3 ) {
+       safe_str("#-1 FUNCTION (REGEDITALLILIT) EXPECTS 3 OR MORE ARGUMENTS [RECEIVED ", buff, bufcx);
+       ival(buff, bufcx, nfargs);
+       safe_chr(']', buff, bufcx);
+   } else {
+      do_regedit(buff, bufcx, player, cause, caller, fargs, nfargs, cargs, ncargs, 7);
+   }
 }
 
 void
@@ -431,9 +535,13 @@ do_regrab(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
   else
      sep = ' ';
 
-  if ( (nfargs >= 4) && *fargs[3] )
-    osep = fargs[3];
-  else {
+  if ( (nfargs >= 4) && *fargs[3] ) {
+    if ( mudconf.delim_null && (strcmp(fargs[3], (char *)"@@") == 0) ) {
+       osep = osepd;
+    } else {
+       osep = fargs[3];
+    }
+  } else {
     osepd[0] = sep;
     osep = osepd;
   }
@@ -464,7 +572,7 @@ do_regrab(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
   do {
     r = split_token(&s, sep);
     if (pcre_exec(re, study, r, strlen(r), 0, 0, offsets, 99) >= 0) {
-      if (all && first) 
+      if (all && first && *osep) 
         safe_str(osep, buff, bufcx);
       safe_str(r, buff, bufcx);
       first = 1;
@@ -668,14 +776,14 @@ do_reswitch(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
     cs = 0;
 
   mstr = exec(player, cause, caller,
-              EV_STRIP | EV_FCHECK | EV_EVAL, fargs[0], cargs, ncargs);
+              EV_STRIP | EV_FCHECK | EV_EVAL, fargs[0], cargs, ncargs, (char **)NULL, 0);
 
   /* try matching, return match immediately when found */
 
 
   for (j = 1; j < (nfargs - 1); j += 2) {
     pstr = exec(player, cause, caller,
-                EV_STRIP | EV_FCHECK | EV_EVAL, fargs[j], cargs, ncargs);
+                EV_STRIP | EV_FCHECK | EV_EVAL, fargs[j], cargs, ncargs, (char **)NULL, 0);
 
     if (quick_regexp_match(pstr, mstr, cs)) {
       /* If there's a #$ in a switch's action-part, replace it with
@@ -685,11 +793,11 @@ do_reswitch(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
        if ( mudconf.switch_substitutions ) {
           tbuf1 = replace_tokens(fargs[j+1], NULL, NULL, mstr);
           tbuff = exec(player, cause, caller, EV_STRIP | EV_FCHECK | EV_EVAL,
-                       tbuf1, cargs, ncargs);
+                       tbuf1, cargs, ncargs, (char **)NULL, 0);
           free_lbuf(tbuf1);
        } else {
           tbuff = exec(player, cause, caller, EV_STRIP | EV_FCHECK | EV_EVAL,
-                       fargs[j+1], cargs, ncargs);
+                       fargs[j+1], cargs, ncargs, (char **)NULL, 0);
        }
 
        safe_str(tbuff, buff, bufcx);
@@ -708,11 +816,11 @@ do_reswitch(char *buff, char **bufcx, dbref player, dbref cause, dbref caller,
      if ( mudconf.switch_substitutions ) {
         tbuf1 = replace_tokens(fargs[nfargs - 1], NULL, NULL, mstr);
         tbuff = exec(player, cause, caller, EV_STRIP | EV_FCHECK | EV_EVAL,
-                     tbuf1, cargs, ncargs);
+                     tbuf1, cargs, ncargs, (char **)NULL, 0);
         free_lbuf(tbuf1);
      } else {
         tbuff = exec(player, cause, caller, EV_STRIP | EV_FCHECK | EV_EVAL,
-                     fargs[nfargs - 1], cargs, ncargs);
+                     fargs[nfargs - 1], cargs, ncargs, (char **)NULL, 0);
      }
     safe_str(tbuff, buff, bufcx);
     free_lbuf(tbuff);

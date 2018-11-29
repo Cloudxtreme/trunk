@@ -19,7 +19,7 @@
 #endif
 #include "debug.h"
 #include "sha1.h"
-#include "ansi.h"
+#include "rhost_ansi.h"
 
 #define FILENUM MUSHCRYPT_C
 
@@ -68,15 +68,43 @@ int mush_crypt_validate(dbref player,
 			int flag) {
 #ifdef CRYPT_ENCRYPT_SHS
   SHS_INFO shsInfo;
-  static char crypt_buff[70];
+  static char crypt_buff[70]; 
+#endif
+#ifdef CRYPT_GLIB2
+  char crypt_salt[70], *s, *d;
 #endif
 
   DPUSH; /* #95 */
 
 #ifdef CRYPT_ENCRYPT_DES
+#ifdef CRYPT_GLIB2
+  memset(crypt_salt, '\0', 70);
+  if ( (*pEncrypted == '$') && (*(pEncrypted+1) == '6') && (*(pEncrypted+2) == '$') ) {
+     s = (char *)pEncrypted;
+     d = crypt_salt;
+     s+=3;
+     while ( *s && *s != '$' ) {
+        if ( *s == '$' ) {
+           s++;
+           continue;
+        }
+        *d = *s;
+        s++;
+        d++;
+     }
+     sprintf(crypt_buff, "$6$%s$", crypt_salt);
+     if (strcmp(pEncrypted, crypt(pUnencrypted, crypt_buff)) == 0) {
+       RETURN(1); /* #95 */
+     }
+  }
   if (strcmp(pEncrypted, crypt(pUnencrypted, "XX")) == 0) {
     RETURN(1); /* #95 */
   }
+#else
+  if (strcmp(pEncrypted, crypt(pUnencrypted, "XX")) == 0) {
+    RETURN(1); /* #95 */
+  }
+#endif
 #endif
 
 #ifdef CRYPT_ENCRYPT_SHS
@@ -92,9 +120,9 @@ int mush_crypt_validate(dbref player,
 
   if (strcmp(pUnencrypted, pEncrypted) == 0) {
     if (flag == 0) {
-      s_Pass(player, mush_crypt(pEncrypted));    
+      s_Pass(player, mush_crypt(pEncrypted, 0));    
     } else {
-      s_MPass(player, mush_crypt(pEncrypted));
+      s_MPass(player, mush_crypt(pEncrypted, 0));
     }
     RETURN(1); /* #95 */
   }
@@ -109,10 +137,38 @@ int mush_crypt_validate(dbref player,
 }
 
 
-char * mush_crypt(const char *key) {
+char * mush_crypt(const char *key, int val) {
 #ifdef CRYPT_ENCRYPT_DES
   DPUSH; /* #96 */
+#ifdef CRYPT_GLIB2
+  char *s, s_buff[10], s_salt[20];
+  int i;
+  s = s_buff;
+  for ( i=0;i<9;i++) {
+     *s = (char)((rand()%88)+38);
+     s++;
+  }
+  s_buff[9]='\0';
+  memset(s_salt, '\0', 20);
+  s = crypt("abcde", "$6$12345$");
+  if ( s && strlen(s) > 20 ) {
+     sprintf(s_salt, "$6$%s$", s_buff);
+     if ( val ) {
+        RETURN(crypt(key, "XX")); /* #96 */
+     } else {
+        RETURN(crypt(key, s_salt)); /* #96 */
+     }
+  } else {
+#ifndef STANDALONE
+     STARTLOG(LOG_ALWAYS, "WIZ", "CRYPT");
+     log_text((char *)"Warning: password encryption does not handle SHA512 hashes.  Incompatible glibc.  Falling back to DES.");
+     ENDLOG
+#endif
+     RETURN(crypt(key, "XX")); /* #96 */
+  }
+#else
   RETURN(crypt(key, "XX")); /* #96 */
+#endif
 #elif CRYPT_ENCRYPT_SHS
   SHS_INFO shsInfo;
   static char crypt_buff[70];
@@ -237,9 +293,9 @@ decode_base64(char *encoded, int len, char *buff, char **bp, int key)
   pdec = decoded;
   if ( !key ) {
      while ( pdec && *pdec ) {
-        if ( !((*pdec == BEEP_CHAR) || isprint(*pdec) || isascii(*pdec)) )
+        if ( !((*pdec == BEEP_CHAR) || isprint(*pdec) || isascii(*pdec) || (*pdec == '\n') || (*pdec == '\r')) )
            *pdec = '?';
-        if ( !(*pdec == BEEP_CHAR) && (((int)*pdec > 255) || ((int)*pdec < 32)) )
+        if ( !(*pdec == BEEP_CHAR) && !(*pdec == '\n') && !(*pdec == '\r') && (((int)*pdec > 255) || ((int)*pdec < 32)) )
            *pdec = '?';
         pdec++;
      }
@@ -254,7 +310,12 @@ decode_base64(char *encoded, int len, char *buff, char **bp, int key)
 int
 check_mux_password(const char *saved, const char *password)
 {
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+   EVP_MD_CTX *ctx;
+   ctx = EVP_MD_CTX_new();
+#else
    EVP_MD_CTX ctx;
+#endif
    const EVP_MD *md;
    uint8_t hash[EVP_MAX_MD_SIZE];
    unsigned int rlen = EVP_MAX_MD_SIZE;
@@ -296,18 +357,29 @@ check_mux_password(const char *saved, const char *password)
    decode_base64(start, strlen(start), decoded, &dp, 1);
 
    /* Double-hash the password */
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+   EVP_DigestInit(ctx, md);
+   EVP_DigestUpdate(ctx, start, strlen(start));
+   EVP_DigestUpdate(ctx, password, strlen(password));
+   EVP_DigestFinal(ctx, hash, &rlen);
+#else
    EVP_DigestInit(&ctx, md);
    EVP_DigestUpdate(&ctx, start, strlen(start));
    EVP_DigestUpdate(&ctx, password, strlen(password));
    EVP_DigestFinal(&ctx, hash, &rlen);
+#endif
 
    /* Decode the stored password */
    dp = decoded;
    decode_base64(end, strlen(end), decoded, &dp, 1);
 
    /* Compare stored to hashed */
-   return_chk = (memcmp(decoded, hash, rlen) == 0);
+// return_chk = (memcmp(decoded, hash, rlen) == 0);
+   return_chk = (strcmp(decoded, (char *)hash) == 0);
    free_lbuf(decoded);
+#if (OPENSSL_VERSION_NUMBER >= 0x10100000L)
+   EVP_MD_CTX_free(ctx);
+#endif
    return (return_chk);
 }
 #else

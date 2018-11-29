@@ -1,26 +1,97 @@
-# Generated automatically from Makefile.in by configure.
-# Makefile for RhostMUSH 3.2.0
+# Makefile for RhostMUSH V:4.0.0p0
+# Pre-defined and built with the make config builder script
 #
 # Search for the text 'CONFIGURATION SECTION' and make any changes needed
 # there.
 
-SHELL=/bin/sh
-srcdir = .
+CHK = $(uname -a|grep -i debian)
+ifeq "$(CHK)" "1"
+   SHELL=/bin/bash
+else
+   CHK = $(test -f /etc/debian_version && echo 1 || echo 0)
+   ifeq "$(CHK)" "1"
+      SHELL=/bin/bash
+   else
+      SHELL=/bin/sh
+   endif
+endif
+
+srcdir = ../src
 bindir = ../bin
 incdir = ../hdrs
 
-ERR = $(shell which gcc >/dev/null; echo $$?)
-ifeq "$(ERR)" "0"
-   CC = gcc
+# This is the custom file that asksource.sh defines
+include $(srcdir)/custom.defs
+
+ifeq "$(USEMYSQL)" "1"
+   CHK = $(shell mysql_config --version 2>/dev/null|wc -l)
+   CHK2 = $(shell ../bin/mysql_config --version 2>/dev/null|wc -l)
+   ifeq "$(CHK)" "1"
+      MYSQL_INCLUDE = $(shell mysql_config --include)
+      MYSQL_LIB = $(shell mysql_config --libs)
+      MYSQL_C = mysql.c
+      MYSQL_O = mysql.o
+      MYSQL_V = \"$(shell mysql_config --version 2>/dev/null)\"
+      MYSQL_VERSION = -DMYSQL_VERSION=$(MYSQL_V)
+   else
+      ifeq "$(CHK2)" "1"
+         MYSQL_INCLUDE = $(shell ../bin/mysql_config --include)
+         MYSQL_LIB = $(shell ../bin/mysql_config --libs)
+         MYSQL_C = mysql.c
+         MYSQL_O = mysql.o
+         MYSQL_V = \"$(shell ../bin/mysql_config --version 2>/dev/null)\"
+         MYSQL_VERSION = -DMYSQL_VERSION=$(MYSQL_V)
+      else
+         ifeq "$(FORCE_MYSQL)" "1"
+            MYSQL_INCLUDE = -I/usr/include/mysql
+            TMP = $(shell /sbin/ldconfig -p|egrep mysqlclient.so$$|awk '{print $$4}')
+            MYSQL_LIB = -L$(TMP) -lmysqlclient -lpthread -lz -lm -lssl -lcrypto -ldl
+            MYSQL_C = mysql.c
+            MYSQL_O = mysql.o
+            MYSQL_V = \"X.XX\"
+            MYSQL_VERSION = -DMYSQL_VERSION=$(MYSQL_V)
+         else
+            MYSQL_INCLUDE=
+            MYSQL_LIB=
+            MYSQL_C=
+            MYSQL_O=
+            MYSQL_V=
+            MYSQL_VERSION=
+         endif
+      endif
+   endif
 else
-   CC = cc
+   MYSQL_INCLUDE=
+   MYSQL_LIB=
+   MYSQL_C=
+   MYSQL_O=
 endif
+
+CHK = $(shell uname -s|grep -c "Darwin")
+ifeq "$(CHK)" "1"
+   EXTLIBS=
+else
+   EXTLIBS=-lrt
+endif
+
+CHK = $(shell which clang >/dev/null; echo $$?)
+ifeq "$(CHK)" "0"
+   CC = clang
+else
+   CHK = $(shell which gcc >/dev/null; echo $$?)
+   ifeq "$(CHK)" "0"
+      CC = gcc
+   else
+      CC = cc
+   endif
+endif
+
 # CPP = gcc -E	# This is broken in autoconf.  Sigh.
 CPP = $(CC) -E
 # Sometime, LIBS won't allow '-lndbm' here.  If so, remove it.
 # If using CYGWIN, comment out the whole line.
-LIBS = -L./qdbm/ -lqdbm
-#LIBS = -L./qdbm/ -lqdbm
+LIBS = $(CUSTLIBS)
+
 LIBOBJS = 
 # for compiling on lowmem systems use this
 #CFLAGS = --param ggc-min-expand=0 --param ggc-min-heapsize=8192
@@ -48,17 +119,9 @@ COM_SRC	=
 COM_OBJ	=
 
 # Door Configurations
-#DRMUSHSRC = door_mush.c
-#DRMUSHOBJ = door_mush.o
-#DREMPIRESRC = empire.c
-#DREMPIREOBJ = empire.o
-#DREMPIREHDR = empire.h
-#DRMAILSRC = door_mail.c
-#DRMAILOBJ = door_mail.o
 DR_SRC = $(DRMUSHSRC) $(DREMPIRESRC) $(DRMAILSRC)
 DR_OBJ = $(DRMUSHOBJ) $(DREMPIREOBJ) $(DRMAILOBJ)
 DR_HDR = $(DREMPIREHDR)
-#DR_DEF = -DENABLE_DOORS -DEXAMPLE_DOOR_CODE
 
 # Everything needed to use the database in standalone mode.
 SA_SRC	= sa-db.c sa-db_rw.c sa-boolexp.c sa-unparse.c sa-compress.c \
@@ -78,7 +141,7 @@ D_SRC	= door.c shs.c mushcrypt.c news.c mail.c mailfix.c debug.c senses.c \
 	  db.c db_rw.c compress.c stringutil.c object.c conf.c flags.c htab.c \
 	  compat.c file_c.c player_c.c bsd.c alloc.c autoreg.c levels.c \
           local.c utils.c pcre.c pcre_extensions.c tprintf.c sha1.c 64btime.c \
-          sqlite.c $(DR_SRC)
+          sqlite.c $(DR_SRC) $(MYSQL_C)
 
 D_OBJ	= door.o shs.o mushcrypt.o news.o mail.o mailfix.o debug.o senses.o \
 	  create.o game.o help.o look.o match.o move.o player.o predicates.o \
@@ -87,7 +150,7 @@ D_OBJ	= door.o shs.o mushcrypt.o news.o mail.o mailfix.o debug.o senses.o \
 	  db.o db_rw.o compress.o stringutil.o object.o conf.o flags.o htab.o \
           compat.o file_c.o player_c.o bsd.o alloc.o autoreg.o levels.o \
           local.o utils.o pcre.o pcre_extensions.o tprintf.o sha1.o 64btime.o \
-          sqlite.o $(DR_OBJ)
+          sqlite.o $(DR_OBJ) $(MYSQL_O)
 
 D_INC	= door.h shs.h news.h mail.h debug.h \
 	  copyright.h flags.h help.h htab.h interface.h match.h functions.h \
@@ -156,7 +219,8 @@ VER_FLG	= -DMUSH_BUILD_DATE="\"`cat date.txt`\"" \
 # SYS_MALLOC - Used if malloc.h is in a borked spot.
 ###########################################################################################################
 
-DEFS = -DBROKEN_NDBM -DBROKEN_ERRNO_SYS -DC_SUB -DLBUF32 -DQDBM -DSQLITE -DSBUF64 -DPCRE_BUILTIN -DSECURE_SIDEEFFECT -DOLD_SETQ -DBANGS -DMARKER_FLAGS -DZENTY_ANSI -DEXPANDED_QREGS -DREALITY_LEVELS -DATTR_HACK -DPROG_LIKEMUX -DPLUSHELP -DUSECRYPT -DSOFTCOM -DMUX_INCDEC -DTINY_U -DUSE_SIDEEFFECT -Wall -DHAS_OPENSSL
+# DEFS is handled by asksource.sh  Feel free to add new definitions but do not remove CUSTDEFS
+DEFS = $(CUSTDEFS) -Wall 
 #
 # Rhost supports two encryption schemes SHS (SHA-1), and the 
 # unix crypt() function (DES).
@@ -210,8 +274,7 @@ DEFS = -DBROKEN_NDBM -DBROKEN_ERRNO_SYS -DC_SUB -DLBUF32 -DQDBM -DSQLITE -DSBUF6
 #
 # IMPORTANT: Make sure you've read CYGWIN.readme before trying this!
 #
-#CYGWIN = -I/usr/local/include -DCYGWIN -DBROKEN_ERRNO_SYS -DBROKEN_NDBM\
-#         -DSYSWAIT -DNODEBUGMONITOR -g 
+#CYGWIN = -I/usr/local/include -DCYGWIN -DBROKEN_ERRNO_SYS -DBROKEN_NDBM -DSYSWAIT -DNODEBUGMONITOR -g 
  
 # Libraries.  
 # The following extra libraries are required based on what system you have.
@@ -231,18 +294,22 @@ DEFS = -DBROKEN_NDBM -DBROKEN_ERRNO_SYS -DC_SUB -DLBUF32 -DQDBM -DSQLITE -DSBUF6
 #
 # #5 - This is for cygwin using the cgyipc library.
 ################################################################  #1
-#MORELIBS  = -lm $(EXTLIBS)
+#MORELIBS  = -lm -lrt
 ################################################################  #2
-#MORELIBS = -lm -lnsl -lresolv -lcrypt $(EXTLIBS)
+#MORELIBS = -lm -lrt -lnsl -lresolv -lcrypt 
 #-L/usr/lib -lc -lm
 ################################################################  #3
-#MORELIBS  = -lm  -lnsl -lsocket -L/usr/ucblib -lucb $(EXTLIBS)
+#MORELIBS  = -lm -lrt -lnsl -lsocket -L/usr/ucblib -lucb
 ################################################################  #4
-#MORELIBS  = -lresolv -lsocket -lnsl -lm $(EXTLIBS)
+#MORELIBS  = -lresolv -lsocket -lnsl -lm -lrt
 ################################################################  #5
-#MORELIBS  = -lm $(EXTLIBS) -L/usr/local/lib -lcygipc
+#MORELIBS  = -lm -lrt -L/usr/local/lib -lcygipc
 
-MORELIBS = -lm -lnsl -lresolv -lcrypt -lsqlite3 $(EXTLIBS) -lcrypto -lssl -lpcre
+#MORELIBS = -lm -lnsl -lresolv -lcrypt $(MYSQL_LIB) $(EXTLIBS) -lcrypto -lssl -lpcre
+
+# MORELIBS is handled by the asksource.sh script for auto-generation.
+# any customization add to this but do not remove CUSTMORELIBS
+MORELIBS = $(CUSTMORELIBS)
 
 # Set this to the directory where the MUSH game lives.
 # This is not really used much
@@ -333,7 +400,7 @@ OUT	= $(bindir)/netrhost $(bindir)/netrhost.debugmon $(bindir)/murboot \
 all: rundate $(OUT)
 
 rundate:
-	@../bin/dodate.sh
+	@$(bindir)/dodate.sh
 
 #.PHONY:	all
 

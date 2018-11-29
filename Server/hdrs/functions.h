@@ -51,7 +51,7 @@ typedef struct ufun {
 #define FN_LOCAL     4096       /* @function is a local user function */
 
 extern void	NDECL(init_functab);
-extern void	FDECL(list_functable, (dbref));
+extern void	FDECL(list_functable, (dbref, char *));
 extern void	FDECL(list_functable2, (dbref, char*, char**, int));
 
 /* (Moved from functions.c by Lensman)
@@ -60,52 +60,52 @@ extern void	FDECL(list_functable2, (dbref, char*, char**, int));
 	if (!fn_range_check(xname, nfargs, xnargs-1, xnargs, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs, &sep, buff, bufcx, 0,   \
-		player, cause, caller, cargs, ncargs))                          \
+		player, cause, caller, cargs, ncargs, 0))                          \
 		return;
 
 #define evarargs_preamble(xname,xnargs)                                 \
 	if (!fn_range_check(xname, nfargs, xnargs-1, xnargs, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs, &sep, buff, bufcx, 1,   \
-	    player, cause, caller, cargs, ncargs))                              \
+	    player, cause, caller, cargs, ncargs, 0))                              \
 		return;
 
 #define mvarargs_preamble(xname,xminargs,xnargs)                        \
 	if (!fn_range_check(xname, nfargs, xminargs, xnargs, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs, &sep, buff, bufcx, 0,   \
-	    player, cause, caller, cargs, ncargs))                              \
+	    player, cause, caller, cargs, ncargs, 0))                              \
 		return;
 
 #define evarargs_preamble2(xname,xnargs,xnargs2)                        \
 	if (!fn_range_check(xname, nfargs, xnargs, xnargs2, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs, &sep, buff, bufcx, 1,   \
-	    player, cause, caller, cargs, ncargs))                              \
+	    player, cause, caller, cargs, ncargs, 0))                              \
 		return;
 
 #define svarargs_preamble(xname,xnargs)                                 \
 	if (!fn_range_check(xname, nfargs, xnargs-2, xnargs, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs-1, &sep, buff, bufcx, 0,        \
-    			 player, cause, caller, cargs, ncargs))                 \
+    			 player, cause, caller, cargs, ncargs, 0))                 \
 		return;                                                 \
 	if (nfargs < xnargs)                                            \
 		osep = sep;                                             \
 	else if (!delim_check(fargs, nfargs, xnargs, &osep, buff, bufcx, 0,    \
-    		 player, cause, caller, cargs, ncargs))                         \
+    		 player, cause, caller, cargs, ncargs, 1))                         \
 		return;
 
 #define sevarargs_preamble(xname,xnargs)                                 \
 	if (!fn_range_check(xname, nfargs, xnargs-2, xnargs, buff, bufcx))     \
 		return;                                                 \
 	if (!delim_check(fargs, nfargs, xnargs-1, &sep, buff, bufcx, 1,        \
-    			 player, cause, caller, cargs, ncargs))                 \
+    			 player, cause, caller, cargs, ncargs, 0))                 \
 		return;                                                 \
 	if (nfargs < xnargs)                                            \
 		osep = sep;                                             \
 	else if (!delim_check(fargs, nfargs, xnargs, &osep, buff, bufcx, 1,    \
-    		 player, cause, caller, cargs, ncargs))                         \
+    		 player, cause, caller, cargs, ncargs, 1))                         \
 		return;
 
 /* Utility function prototypes */
@@ -115,7 +115,7 @@ char *upcasestr(char *);
 char *next_token(char *, char);
 char * split_token(char **, char);
 int fn_range_check_real(const char *, int, int, int, char *, char **, int);
-int delim_check(char *[], int, int, char *, char *, char **, int, dbref, dbref, dbref, char *[], int);
+int delim_check(char *[], int, int, char *, char *, char **, int, dbref, dbref, dbref, char *[], int, int);
 int list2arr(char *arr[], int maxlen, char *list, char sep);
 #define fn_range_check(a, b, c, d, e, f)	fn_range_check_real(a, b, c, d, e, f, 0)
 

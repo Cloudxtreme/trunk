@@ -44,9 +44,9 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
 		char *command, char *cargs[], int ncargs)
 {
    char	*tbuf, *curr, *objstring, *buff2, *buff3, *buff3ptr, delimiter = ' ', *tempstr, *tpr_buff, *tprp_buff, 
-        *buff3tok, *pt, *savereg[MAX_GLOBAL_REGS], *dbfr;
+        *buff3tok, *pt, *savereg[MAX_GLOBAL_REGS], *dbfr, *npt, *saveregname[MAX_GLOBAL_REGS], *s_rollback;
    time_t i_now;
-   int x, cntr, pid_val, i_localize, i_clearreg, i_nobreak, i_inline, i_storebreak;
+   int x, cntr, pid_val, i_localize, i_clearreg, i_nobreak, i_inline, i_storebreak, i_jump, i_rollback, i_chkinline;
 
    pid_val = 0;
    i_storebreak = mudstate.breakst;
@@ -102,8 +102,10 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
    if ( i_clearreg || i_localize ) {
       for (x = 0; x < MAX_GLOBAL_REGS; x++) {
          savereg[x] = alloc_lbuf("ulocal_reg");
+         saveregname[x] = alloc_sbuf("ulocal_regname");
       }
    }
+   s_rollback = alloc_lbuf("s_rollback_dolist");
    while (curr && *curr) {
       if ((x % 25) == 0)
          cache_reset(0);
@@ -123,36 +125,63 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
                mudstate.dol_inumarr[mudstate.dolistnest] = cntr;
             }
             mudstate.dolistnest++;
-            buff3 = replace_string(BOUND_VAR, objstring, buff2, 0);
-            buff3ptr = strtok_r(buff3, ";", &buff3tok);
             if ( i_clearreg || i_localize ) {
                for (x = 0; x < MAX_GLOBAL_REGS; x++) {
                   *savereg[x] = '\0';
+                  *saveregname[x] = '\0';
                   pt = savereg[x];
+                  npt = saveregname[x];
                   safe_str(mudstate.global_regs[x],savereg[x],&pt);
+                  safe_str(mudstate.global_regsname[x],saveregname[x],&npt);
                   if ( i_clearreg ) {
                      *mudstate.global_regs[x] = '\0';
+                     *mudstate.global_regsname[x] = '\0';
                   }
                }
             }
-            i_now = mudstate.now;
-            while ( !mudstate.breakdolist && buff3ptr && !mudstate.breakst ) {
-               process_command(player, cause, 0, buff3ptr, cargs, ncargs, InProgram(player));
-               if ( time(NULL) > (i_now + 3) ) {
+            if ( mudstate.chkcpu_inline ) {
+               i_now = mudstate.now;
+            } else {
+               i_now = time(NULL);
+            }
+            buff3 = replace_string(BOUND_VAR, objstring, buff2, 0);
+            buff3tok = buff3;
+            strcpy(s_rollback, mudstate.rollback);
+            i_jump = mudstate.jumpst;
+            i_rollback = mudstate.rollbackcnt;
+            mudstate.jumpst = mudstate.rollbackcnt = 0;
+            if ( buff3tok ) {
+               strcpy(mudstate.rollback, buff3tok);
+            }
+            i_chkinline = mudstate.chkcpu_inline;
+            sprintf(mudstate.chkcpu_inlinestr, "%s", (char *)"@dolist/inline");
+            mudstate.chkcpu_inline = 1;
+            while ( !mudstate.breakdolist && !mudstate.chkcpu_toggle && buff3tok && !mudstate.breakst ) { 
+               buff3ptr = parse_to(&buff3tok, ';', 0);
+               if ( buff3ptr && *buff3ptr ) {
+                  process_command(player, cause, 0, buff3ptr, cargs, ncargs, InProgram(player), mudstate.no_hook);
+               }
+               if ( mudstate.chkcpu_toggle || (time(NULL) > (i_now + 3)) ) {
                    if ( !mudstate.breakdolist ) {
                       notify(player, unsafe_tprintf("@dolist/inline:  Aborted for high utilization [nest level %d].", mudstate.dolistnest));
                    }
                    i_nobreak=0;
-                   mudstate.breakdolist=1;
+                   mudstate.breakdolist = 1;
                    break;
                }
-               buff3ptr = strtok_r(NULL, ";", &buff3tok);
             }
+            mudstate.chkcpu_inline = i_chkinline;
+            mudstate.jumpst = i_jump;
+            mudstate.rollbackcnt = i_rollback;
+            strcpy(mudstate.rollback, s_rollback);
             if ( i_clearreg || i_localize ) {
                for (x = 0; x < MAX_GLOBAL_REGS; x++) {
                   pt = mudstate.global_regs[x];
+                  npt = mudstate.global_regsname[x];
                   safe_str(savereg[x],mudstate.global_regs[x],&pt);
+                  safe_str(saveregname[x],mudstate.global_regsname[x],&npt);
                   *savereg[x] = '\0';
+                  *saveregname[x] = '\0';
                }
             }
             free_lbuf(buff3);
@@ -171,6 +200,7 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
       }
       cntr++;
    }
+   free_lbuf(s_rollback);
    if ( i_inline ) {
       if ( desc_in_use != NULL ) {
          mudstate.breakst = i_storebreak;
@@ -179,6 +209,7 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
    if ( i_clearreg || i_localize ) {
       for (x = 0; x < MAX_GLOBAL_REGS; x++) {
          free_lbuf(savereg[x]);
+         free_sbuf(saveregname[x]);
       }
    }
    free_lbuf(tpr_buff);
@@ -195,9 +226,11 @@ void do_dolist (dbref player, dbref cause, int key, char *list,
    }
    if ( cntr == 1 )
       notify (player, "That's terrific, but what should I do with the list?");
+/*
    if ( (mudstate.dolistnest == 0) && mudstate.breakdolist ) {
       mudstate.chkcpu_toggle = 1;
    }
+*/
 }
 
 /* Regular @find command */
@@ -368,58 +401,79 @@ STATS	statinfo;
 #endif	/* MSTATS */
 }
 
-int chown_all (dbref from_player, dbref to_player)
+int chown_all (dbref from_player, dbref to_player, int key)
 {
-int	i, count, quota_out[4], quota_in[4];
+   int i, count, quota_out[4], quota_in[4];
+   int i_room, i_exit, i_player, i_thing;
 
-	if (Typeof(from_player) != TYPE_PLAYER)
-		from_player = Owner(from_player);
-	if (Typeof(to_player) != TYPE_PLAYER)
-		to_player = Owner(to_player);
-	count = 0;
-	for (i = 0; i < 4; i++)
-	  quota_out[i] = quota_in[i] = 0;
-	DO_WHOLE_DB(i) {
-		if (Recover(i))
-		  continue;
-		if ((Owner(i) == from_player) && (Owner(i) != i)) {
-			switch (Typeof(i)) {
-			case TYPE_PLAYER:
-				s_Owner(i, i);
-				quota_out[TYPE_PLAYER] += mudconf.player_quota;
-				break;
-			case TYPE_THING:
-				s_Owner (i, to_player);
-				quota_out[TYPE_THING] += mudconf.thing_quota;
-				quota_in[TYPE_THING] += mudconf.thing_quota;
-				break;
-			case TYPE_ROOM:
-				s_Owner (i, to_player);
-				quota_out[TYPE_ROOM] += mudconf.room_quota;
-				quota_in[TYPE_ROOM] += mudconf.room_quota;
-				break;
-			case TYPE_EXIT:
-				s_Owner (i, to_player);
-				quota_out[TYPE_EXIT] += mudconf.exit_quota;
-				quota_in[TYPE_EXIT] += mudconf.exit_quota;
-				break;
-			default:
-				s_Owner (i, to_player);
-			}
-			s_Flags(i, (Flags(i) & ~(CHOWN_OK|INHERIT)) | HALT);
-			count++;
-		}
-	}
-	for (i = 0; i < 4; i++) {
-	  add_quota(from_player, quota_out[i], i);
-	  pay_quota_force(to_player, quota_in[i], i);
-	}
-	return count;
+   if (Typeof(from_player) != TYPE_PLAYER)
+      from_player = Owner(from_player);
+   if (Typeof(to_player) != TYPE_PLAYER)
+      to_player = Owner(to_player);
+   count = 0;
+   for (i = 0; i < 4; i++)
+      quota_out[i] = quota_in[i] = 0;
+   i_room   = (key < 2) || (key & CHOWN_ROOM);
+   i_exit   = (key < 2) || (key & CHOWN_EXIT);
+   i_player = (key < 2) || (key & CHOWN_PLAYER);
+   i_thing  = (key < 2) || (key & CHOWN_THING);
+
+   DO_WHOLE_DB(i) {
+      if (Recover(i))
+         continue;
+      if ((Owner(i) == from_player) && (Owner(i) != i)) {
+         switch (Typeof(i)) {
+            case TYPE_PLAYER:
+               if ( !i_player )
+                  continue;
+               if ( (key & 1) && Robot(i) && (Owner(i) != i) )
+                  s_Owner (i, to_player);
+               else
+                  s_Owner (i, i);
+               quota_out[TYPE_PLAYER] += mudconf.player_quota;
+               break;
+            case TYPE_THING:
+               if ( !i_thing )
+                  continue;
+               s_Owner (i, to_player);
+               quota_out[TYPE_THING] += mudconf.thing_quota;
+               quota_in[TYPE_THING] += mudconf.thing_quota;
+               break;
+            case TYPE_ROOM:
+               if ( !i_room )
+                  continue;
+               s_Owner (i, to_player);
+               quota_out[TYPE_ROOM] += mudconf.room_quota;
+               quota_in[TYPE_ROOM] += mudconf.room_quota;
+               break;
+            case TYPE_EXIT:
+               if ( !i_exit )
+                  continue;
+               s_Owner (i, to_player);
+               quota_out[TYPE_EXIT] += mudconf.exit_quota;
+               quota_in[TYPE_EXIT] += mudconf.exit_quota;
+               break;
+            default:
+               s_Owner (i, to_player);
+         }
+         if ( !(key & 1) ) {
+/*          s_Flags(i, (Flags(i) & ~(CHOWN_OK|INHERIT)) | HALT); */
+            s_Flags(i, (Flags(i) & ~(CHOWN_OK|INHERIT|WIZARD)) | HALT);
+            s_Flags2(i, (Flags2(i) & ~(IMMORTAL|ADMIN|BUILDER|GUILDMASTER)));
+         }
+         count++;
+      }
+   }
+   for (i = 0; i < 4; i++) {
+      add_quota(from_player, quota_out[i], i);
+      pay_quota_force(to_player, quota_in[i], i);
+   }
+   return count;
 }
 
 void do_chownall (dbref player, dbref cause, int key, char *from, char *to)
 {
-int	count;
+int	count, bLeaveFlags;
 dbref	victim, recipient;
 
 	init_match (player, from, TYPE_PLAYER);
@@ -446,7 +500,9 @@ dbref	victim, recipient;
 		notify(player, "Permission denied.");
 		return;
 	}
-	count = chown_all(victim, recipient);
+        bLeaveFlags = (key & CHOWN_PRESERVE) && Wizard(player);
+        bLeaveFlags = bLeaveFlags | (key & (CHOWN_ROOM|CHOWN_EXIT|CHOWN_THING|CHOWN_PLAYER));
+	count = chown_all(victim, recipient, bLeaveFlags);
 	if (!Quiet(player)) {
 		notify(player, unsafe_tprintf("%d objects @chowned.", count));
 	}
@@ -812,7 +868,7 @@ int	save_invk_ctr;
 				parm->s_rst_eval, 0);
 			result = exec(player, cause, cause,
 				EV_FCHECK|EV_EVAL|EV_NOTRACE, buff2,
-				(char **)NULL, 0);
+				(char **)NULL, 0, (char **)NULL, 0);
 			free_lbuf(buff2);
 			if (!*result || !xlate(result)) {
 				free_lbuf(result);
@@ -832,32 +888,32 @@ int	save_invk_ctr;
 
 static void search_mark (dbref player, int key, FILE** master)
 {
-dbref	thing;
-int	nchanged, is_marked;
+   dbref thing;
+   int nchanged, is_marked;
 
-	nchanged = 0;
-	for (thing=file_olist_first(master); thing!=NOTHING; thing=file_olist_next(master)) {
-		is_marked = Marked(thing);
+   nchanged = 0;
+   for (thing=file_olist_first(master); thing!=NOTHING; thing=file_olist_next(master)) {
+      is_marked = Marked(thing);
 
-		/* Don't bother checking if marking and already marked
-		 * (or if unmarking and not marked) */
+      /* Don't bother checking if marking and already marked
+       * (or if unmarking and not marked) 
+       */
 
-		if (((key == SRCH_MARK) && is_marked) ||
-		    ((key == SRCH_UNMARK) && !is_marked))
-			continue;
-			/* Toggle the mark bit and update the counters */
-			if (key == SRCH_MARK) {
-			Mark(thing);
-			nchanged++;
-		} else {
-			Unmark(thing);
-			nchanged++;
-		}
-	}
-	notify(player,
-		unsafe_tprintf("%d objects %smarked",
-			nchanged, ((key==SRCH_MARK) ? "" : "un")));
-	return;
+      if (((key == SRCH_MARK) && is_marked) || ((key == SRCH_UNMARK) && !is_marked)) {
+         continue;
+      }
+      /* Toggle the mark bit and update the counters */
+      if (key == SRCH_MARK) {
+         Mark(thing);
+         nchanged++;
+      } else {
+         Unmark(thing);
+         nchanged++;
+      }
+   }
+   notify(player, unsafe_tprintf("%d objects %smarked",
+                                 nchanged, ((key==SRCH_MARK) ? "" : "un")));
+   return;
 }
 					
 void do_search (dbref player, dbref cause, int key, char *arg)

@@ -91,8 +91,11 @@ setq_templates(dbref thing)
 {
    char *s_instr, *s_intok, *s_intokr, *s_intok2, *s_intokr2, c_field[2];
    dbref target_id;
-   int target_attr, regnum, i;
+   int target_attr, regnum;
    ATTR *m_attr;
+#ifdef EXPANDED_QREGS
+   int i;
+#endif
  
    regnum = -1;
    m_attr = atr_str("setq_template");
@@ -216,7 +219,8 @@ atr_match1(dbref thing, dbref parent, dbref player, char type,
     int match, attr, aflags, i, ck, ck2, ck3, loc, attrib2, x, i_cpuslam, 
         do_brk, aflags_set, oldchk, chkwild, i_inparen;
     char *buff, *s, *s2, *s3, *as, *s_uselock, *atext, *result, buff2[LBUF_SIZE+1];
-    char *args[10], *savereg[MAX_GLOBAL_REGS], *pt, *cpuslam, *cputext, *cpulbuf;
+    char *args[10], *savereg[MAX_GLOBAL_REGS], *pt, *cpuslam, *cputext, *cpulbuf,
+         *saveregname[MAX_GLOBAL_REGS], *npt;
     ATTR *ap, *ap2;
 
     DPUSH; /* #70 */
@@ -330,9 +334,10 @@ atr_match1(dbref thing, dbref parent, dbref player, char type,
            }
            chkwild = regexp_wild_match(buff2,
                                 ((aflags & AF_NOPARSE) ? mudstate.last_command : str), args, 10, 1);
-        } else
+        } else {
            chkwild = wild_match(buff + 1, 
                                 ((aflags & AF_NOPARSE) ? mudstate.last_command : str), args, 10, 0);
+        }
 	if ( chkwild ) {
 	  if (!dpcheck || (dpcheck && ((Owner(player) == Owner(thing)) || 
 	    !DePriv(player,NOTHING,DP_ABUSE,POWER7,POWER_LEVEL_NA)) &&
@@ -357,13 +362,16 @@ atr_match1(dbref thing, dbref parent, dbref player, char type,
                            if ( !(attrib2 & AF_NOPROG) ) {
                               for (x = 0; x < MAX_GLOBAL_REGS; x++) {
                                  savereg[x] = alloc_lbuf("ulocal_reg");
+                                 saveregname[x] = alloc_sbuf("ulocal_regname");
                                  pt = savereg[x];
+                                 npt = saveregname[x];
                                  safe_str(mudstate.global_regs[x],savereg[x],&pt);
+                                 safe_str(mudstate.global_regsname[x],saveregname[x],&npt);
                               }
                               cputext = alloc_lbuf("store_text_attruselock");
                               strcpy(cputext, atext);
-                              result = exec(parent, player, player, EV_FCHECK | EV_EVAL, atext,
-                                            (char **)NULL, 0);
+                              result = cpuexec(parent, player, player, EV_FCHECK | EV_EVAL, atext,
+                                               args, 10, (char **)NULL, 0);
                               if ( !i_cpuslam && mudstate.chkcpu_toggle ) {
                                  i_cpuslam = 1;
                                  cpuslam = alloc_lbuf("uselock_cpuslam");
@@ -384,8 +392,11 @@ atr_match1(dbref thing, dbref parent, dbref player, char type,
                               free_lbuf(cputext);
                               for (x = 0; x < MAX_GLOBAL_REGS; x++) {
                                  pt = mudstate.global_regs[x];
+                                 npt = mudstate.global_regsname[x];
                                  safe_str(savereg[x],mudstate.global_regs[x],&pt);
+                                 safe_str(saveregname[x],mudstate.global_regsname[x],&npt);
                                  free_lbuf(savereg[x]);
+                                 free_sbuf(saveregname[x]);
                               }
                               if ( *result && result && (atoi(result) != 1) ) 
                                  do_brk=1;
@@ -449,7 +460,11 @@ atr_match1(dbref thing, dbref parent, dbref player, char type,
        did_it(player, thing, A_UFAIL,
              "You can not use $-commands on that.",
               A_OUFAIL, NULL, A_AUFAIL, (char **)NULL, 0);
-       RETURN(-1); /* #70 */
+       if ( Flags3(thing) & STOP ) {
+          RETURN(3); /* #70 */
+       } else {
+          RETURN(-1); /* #70 */
+       }
     } else {
        RETURN(match); /* #70 */
     }
@@ -532,8 +547,8 @@ check_filter(dbref object, dbref player, int filter, const char *msg)
 	free_lbuf(buf);
 	RETURN(1); /* #72 */
     }
-    dp = nbuf = exec(object, player, player, EV_FIGNORE | EV_EVAL | EV_TOP, buf,
-		     (char **) NULL, 0);
+    dp = nbuf = cpuexec(object, player, player, EV_FIGNORE | EV_EVAL | EV_TOP, buf,
+		        (char **) NULL, 0, (char **)NULL, 0);
     free_lbuf(buf);
     do {
 	cp = parse_to(&dp, ',', EV_STRIP);
@@ -561,8 +576,8 @@ add_prefix(dbref object, dbref player, int prefix,
 	cp = buf;
 	safe_str((char *) dflt, buf, &cp);
     } else {
-	nbuf = exec(object, player, player, EV_FIGNORE | EV_EVAL | EV_TOP, buf,
-		    (char **) NULL, 0);
+	nbuf = cpuexec(object, player, player, EV_FIGNORE | EV_EVAL | EV_TOP, buf,
+		       (char **) NULL, 0, (char **)NULL, 0);
 	free_lbuf(buf);
 	buf = nbuf;
 	cp = &buf[strlen(buf)];
@@ -596,13 +611,14 @@ void
 notify_check(dbref target, dbref sender, const char *msg, int port, int key, int i_type)
 {
 #ifdef ZENTY_ANSI
-    char *mp2;
+    char *mp2, *msg_utf, *mp_utf, *pvap[4];
 #endif
-    char *msg_ns, *mp, *msg_ns2, *tbuff, *tp, *buff, *s_tstr, *s_tbuff;
-    char *args[10], *s_logroom, *cpulbuf, *s_aptext, *s_aptextptr, *s_strtokr, *s_pipeattr, *s_pipebuff, *s_pipebuffptr;
+    char *msg_ns, *mp, *msg_ns2, *tbuff, *tp, *buff, *s_tstr, *s_tbuff, *vap[4];
+    char *args[10], *s_logroom, *cpulbuf, *s_aptext, *s_aptextptr, *s_strtokr, *s_pipeattr, *s_pipeattr2, *s_pipebuff, *s_pipebuffptr;
     dbref aowner, targetloc, recip, obj, i_apowner, passtarget;
-    int i, nargs, aflags, has_neighbors, pass_listen, noansi=0;
+    int i, nargs, aflags, has_neighbors, pass_listen, noansi=0, i_pipetype, i_brokenotify = 0, i_chkcpu;
     int check_listens, pass_uselock, is_audible, i_apflags, i_aptextvalidate = 0, i_targetlist = 0, targetlist[LBUF_SIZE];
+    struct tm *ttm2;
     FWDLIST *fp;
     ATTR *ap_log, *ap_attrpipe;
 
@@ -613,6 +629,7 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 
     msg_ns2 = NULL;
     cpulbuf = NULL;
+    i_chkcpu = 0;
 
     /* If speaker is invalid or message is empty, just exit */
 
@@ -629,11 +646,18 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 	VOIDRETURN; /* #75 */
     }
     /* Let's optionally log to a file if specified -- Note:  This bypasses spoof output obviously */ 
-    if ( H_Attrpipe(target) ) {
+    if ( !port && H_Attrpipe(target) ) {
+       i_pipetype = 0;
        ap_attrpipe = atr_str_notify("___ATTRPIPE");
        if ( ap_attrpipe ) {
           s_pipeattr = atr_get(target, ap_attrpipe->number, &aowner, &aflags);
           if ( *s_pipeattr ) {
+             if ( (s_pipeattr2 = strchr(s_pipeattr, ' ')) != NULL ) {
+                *s_pipeattr2 = '\0';
+                i_pipetype = atoi(s_pipeattr2+1);
+             } else {
+                i_pipetype = 0;
+             }
              ap_attrpipe = atr_str_notify(s_pipeattr);
              if ( ap_attrpipe ) {
                 free_lbuf(s_pipeattr);
@@ -648,11 +672,15 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
                       safe_str((char *)msg, s_pipebuff, &s_pipebuffptr);
                       atr_add_raw(target, ap_attrpipe->number, s_pipebuff);
                       free_lbuf(s_pipebuff);
-                      free_lbuf(s_pipeattr);
-	              mudstate.ntfy_nest_lev--;
-                      if ( TogNoisy(target) )
-                         raw_notify(target, (char *)"Piping output to attribute.", 0, 1);
-	              VOIDRETURN; /* #75 */
+                      if ( i_pipetype == 0 ) {
+                         free_lbuf(s_pipeattr);
+                         if ( !Quiet(target) && TogNoisy(target) )
+                            raw_notify(target, (char *)"Piping output to attribute.", 0, 1);
+	                 mudstate.ntfy_nest_lev--;
+	                 VOIDRETURN; /* #75 */
+                      }
+                   } else {
+                      i_pipetype = -1;
                    }
                 }
              }
@@ -661,13 +689,19 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
        }
        if ( !ap_attrpipe ) {
           raw_notify(target, (char *)"Notice: Piping attribute no longer exists.  Piping has been auto-disabled.", 0, 1);
+          i_pipetype = -2;
        } else {
-          raw_notify(target, (char *)"Notice: Piping attribute full.  Piping has been auto-disabled.", 0, 1);
+          if ( (i_pipetype == -1) || (i_pipetype == 0) ) {
+             raw_notify(target, (char *)"Notice: Piping attribute full.  Piping has been auto-disabled.", 0, 1);
+             i_pipetype = -2;
+          }
        }
-       s_Flags4(target, (Flags4(target) & (~HAS_ATTRPIPE)));
-       ap_attrpipe = atr_str_notify("___ATTRPIPE");
-       if ( ap_attrpipe )
-          atr_clr(target, ap_attrpipe->number);
+       if ( i_pipetype == -2 ) {
+          s_Flags4(target, (Flags4(target) & (~HAS_ATTRPIPE)));
+          ap_attrpipe = atr_str_notify("___ATTRPIPE");
+          if ( ap_attrpipe )
+             atr_clr(target, ap_attrpipe->number);
+       }
     }
     /* If we want NOSPOOF output, generate it.  It is only needed if
      * we are sending the message to the target object */
@@ -678,12 +712,12 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 	mp = msg_ns = alloc_lbuf("notify_check");
 #ifdef ZENTY_ANSI
 	mp2 = msg_ns2 = alloc_lbuf("notify_check_accents");
+	mp_utf = msg_utf = alloc_lbuf("notify_check_utf");
 #endif
-	if (!port && Nospoof(target) &&
-	    (target != sender) &&
-	    ((!Wizard(sender) || (Wizard(sender) && Immortal(target))) || (Spoof(sender) || Spoof(Owner(sender)))) &&
-	    (target != mudstate.curr_enactor) &&
-	    (target != mudstate.curr_player)) {
+	if ( !port && Nospoof(target) && (target != sender) &&
+  	     ( !(Wizard(sender) || HasPriv(sender, target, POWER_WIZ_SPOOF, POWER5, NOTHING)) || 
+               Immortal(target) || Spoof(sender) || Spoof(Owner(sender)) ) &&
+	     (target != mudstate.curr_enactor) && (target != mudstate.curr_player)) {
 
 	    /* I'd really like to use unsafe_tprintf here but I can't
 	     * because the caller may have.
@@ -709,22 +743,32 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 	    }
 	    safe_str((char *) "] ", msg_ns, &mp);
 	    free_sbuf(tbuff);
+#ifdef ZENTY_ANSI
+            safe_str(msg_ns, msg_ns2, &mp2);
+            safe_str(msg_ns, msg_utf, &mp_utf);
+#endif
 	}
 #ifdef ZENTY_ANSI       
        if(!(key & MSG_NO_ANSI)) {
-           parse_ansi((char *) msg, msg_ns, &mp, msg_ns2, &mp2);
+           parse_ansi((char *) msg, msg_ns, &mp, msg_ns2, &mp2, msg_utf, &mp_utf);
            *mp = '\0';
            *mp2 = '\0';
-           if ( Accents(target) ) {
-              memcpy(msg_ns, msg_ns2, LBUF_SIZE);
-           } 
+           *mp_utf = '\0';
+           if ( !port ) {
+              if ( UTF8(target) ) {
+                 memcpy(msg_ns, msg_utf, LBUF_SIZE);
+              } else if ( Accents(target) ) {
+                 memcpy(msg_ns, msg_ns2, LBUF_SIZE);
+              } 
+           }
        } else
 #endif
            safe_str((char *) msg, msg_ns, &mp);
     
 #ifdef ZENTY_ANSI       
+       free_lbuf(msg_ns2);
+       free_lbuf(msg_utf);
 #endif
-        free_lbuf(msg_ns2);
     } else {
 	msg_ns = NULL;
     }
@@ -734,11 +778,76 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 
   if (port) {
       raw_notify(target, msg_ns, port, 1);
-  }
-  else {
+  } else {
     check_listens = Halted(target) ? 0 : 1;
     switch (Typeof(target)) {
     case TYPE_PLAYER:
+        i_chkcpu = mudstate.chkcpu_toggle;
+        if ( mudstate.posesay_fluff && Connected(target) ) {
+           ap_attrpipe = atr_str_notify("SPEECH_PREFIX");
+           if ( ap_attrpipe ) {
+              s_pipeattr = atr_get(target, ap_attrpipe->number, &aowner, &aflags);
+              if ( *s_pipeattr && !(aflags & AF_NOPROG) ) {
+                 vap[0] = msg_ns;
+                 vap[1] = alloc_mbuf("speech_prefix");
+                 vap[2] = alloc_mbuf("speech_prefix2");
+                 vap[3] = alloc_mbuf("speech_prefix3");
+                 s_pipeattr2 = alloc_lbuf("speech_cpu");
+                 sprintf(s_pipeattr2, "%.*s", (LBUF_SIZE - 100), s_pipeattr);
+                 if ( Good_chk(mudstate.posesay_dbref) && 
+	              ( !(Wizard(mudstate.posesay_dbref) || HasPriv(mudstate.posesay_dbref, target, POWER_WIZ_SPOOF, POWER5, NOTHING)) || 
+                        Immortal(target) || Spoof(mudstate.posesay_dbref) || Spoof(Owner(mudstate.posesay_dbref)) ) ) {
+                    sprintf(vap[3], "#%d", mudstate.posesay_dbref);
+                 } else {
+                    sprintf(vap[3], "#%d", -1);
+                 }
+                 ttm2 = localtime(&mudstate.now);
+                 ttm2->tm_year += 1900;
+                 sprintf(vap[1], "%02d/%02d/%d", ttm2->tm_mday, ttm2->tm_mon + 1, ttm2->tm_year);
+                 sprintf(vap[2], "%02d:%02d:%02d", ttm2->tm_hour, ttm2->tm_min, ttm2->tm_sec);
+                 if ( mudconf.posesay_funct && !mudstate.chkcpu_toggle ) {
+                    mudstate.posesay_fluff = 0;
+                    s_pipebuffptr = cpuexec(target, target, target, EV_FCHECK | EV_EVAL | EV_STRIP, s_pipeattr,
+                                            vap, 4, (char **)NULL, 0);
+                    mudstate.posesay_fluff = 1;
+                    if ( mudstate.chkcpu_toggle ) {
+                       aflags |= AF_NOPROG;
+                       atr_set_flags(target, ap_attrpipe->number, aflags);
+                       broadcast_monitor(target, MF_CPU, "CPU RUNAWAY PROCESS (SPEECH_PREFIX)",
+                                         (char *)s_pipeattr2, NULL, target, 0, 0, NULL);
+                       STARTLOG(LOG_ALWAYS, "WIZ", "CPU");
+                          log_name_and_loc(target);
+                          sprintf(s_pipeattr, " CPU/SPEECH_PREFIX overload: (#%d) %.*s", target, (LBUF_SIZE - 100), s_pipeattr2);
+                          log_text(s_pipeattr);
+                       ENDLOG
+                    }
+                 } else {
+                    s_pipebuffptr = cpuexec(target, target, target, EV_FIGNORE | EV_EVAL | EV_NOFCHECK, s_pipeattr,
+                                            vap, 4, (char **)NULL, 0);
+                 }
+                 free_mbuf(vap[1]);
+                 free_mbuf(vap[2]);
+                 free_mbuf(vap[3]);
+                 if ( *s_pipebuffptr ) {
+#ifdef ZENTY_ANSI
+                    pvap[0] = vap[0] = alloc_lbuf("vap0");
+                    pvap[1] = vap[1] = alloc_lbuf("vap1");
+                    pvap[2] = vap[2] = alloc_lbuf("vap2");
+                    parse_ansi((char *) s_pipebuffptr, vap[0], &pvap[0], vap[1], &pvap[1], vap[2], &pvap[2]);
+                    raw_notify(target, vap[0], port, 1);
+                    free_lbuf(vap[0]);
+                    free_lbuf(vap[1]);
+                    free_lbuf(vap[2]);
+#else
+                    raw_notify(target, s_pipebuffptr, port, 1);
+#endif
+                 }
+                 free_lbuf(s_pipebuffptr);
+                 free_lbuf(s_pipeattr2);
+              }
+              free_lbuf(s_pipeattr);
+           }
+        }
 	if (key & MSG_ME) {
            if ( mudstate.emit_substitute ) {
               s_tbuff = alloc_sbuf("emit_substitute");
@@ -751,6 +860,72 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
              raw_notify(target, msg_ns, port, 1);
            }
         }
+        if ( mudstate.posesay_fluff && Connected(target) ) {
+           ap_attrpipe = atr_str_notify("SPEECH_SUFFIX");
+           if ( ap_attrpipe ) {
+              s_pipeattr = atr_get(target, ap_attrpipe->number, &aowner, &aflags);
+              if ( *s_pipeattr && !(aflags & AF_NOPROG) ) {
+                 vap[0] = msg_ns;
+                 vap[1] = alloc_mbuf("speech_prefix");
+                 vap[2] = alloc_mbuf("speech_prefix2");
+                 vap[3] = alloc_mbuf("speech_prefix3");
+                 s_pipeattr2 = alloc_lbuf("speech_cpu");
+                 sprintf(s_pipeattr2, "%.*s", (LBUF_SIZE - 100), s_pipeattr);
+                 if ( Good_chk(mudstate.posesay_dbref) && 
+	              ( !(Wizard(mudstate.posesay_dbref) || HasPriv(mudstate.posesay_dbref, target, POWER_WIZ_SPOOF, POWER5, NOTHING)) || 
+                        Immortal(target) || Spoof(mudstate.posesay_dbref) || Spoof(Owner(mudstate.posesay_dbref)) ) ) {
+                    sprintf(vap[3], "#%d", mudstate.posesay_dbref);
+                 } else {
+                    sprintf(vap[3], "#%d", -1);
+                 }
+                 ttm2 = localtime(&mudstate.now);
+                 ttm2->tm_year += 1900;
+                 sprintf(vap[1], "%02d/%02d/%d", ttm2->tm_mday, ttm2->tm_mon + 1, ttm2->tm_year);
+                 sprintf(vap[2], "%02d:%02d:%02d", ttm2->tm_hour, ttm2->tm_min, ttm2->tm_sec);
+                 if ( mudconf.posesay_funct && !mudstate.chkcpu_toggle ) {
+                    mudstate.posesay_fluff = 0;
+                    s_pipebuffptr = cpuexec(target, target, target, EV_FCHECK | EV_EVAL | EV_STRIP, s_pipeattr,
+                                            vap, 4, (char **)NULL, 0);
+                    mudstate.posesay_fluff = 1;
+                    if ( mudstate.chkcpu_toggle ) {
+                       aflags |= AF_NOPROG;
+                       atr_set_flags(target, ap_attrpipe->number, aflags);
+                       broadcast_monitor(target, MF_CPU, "CPU RUNAWAY PROCESS (SPEECH_SUFFIX)",
+                                         (char *)s_pipeattr2, NULL, target, 0, 0, NULL);
+                       STARTLOG(LOG_ALWAYS, "WIZ", "CPU");
+                          log_name_and_loc(target);
+                          sprintf(s_pipeattr, " CPU/SPEECH overload: (#%d) %.*s", target, (LBUF_SIZE - 100), s_pipeattr2);
+                          log_text(s_pipeattr);
+                       ENDLOG
+                    }
+                 } else {
+                    s_pipebuffptr = cpuexec(target, target, target, EV_FIGNORE | EV_EVAL | EV_NOFCHECK, s_pipeattr,
+                                            vap, 4, (char **)NULL, 0);
+                 }
+                 free_mbuf(vap[1]);
+                 free_mbuf(vap[2]);
+                 free_mbuf(vap[3]);
+                 if ( *s_pipebuffptr ) {
+#ifdef ZENTY_ANSI
+                    pvap[0] = vap[0] = alloc_lbuf("vap0");
+                    pvap[1] = vap[1] = alloc_lbuf("vap1");
+                    pvap[2] = vap[2] = alloc_lbuf("vap2");
+                    parse_ansi((char *) s_pipebuffptr, vap[0], &pvap[0], vap[1], &pvap[1], vap[2], &pvap[2]);
+                    raw_notify(target, vap[0], port, 1);
+                    free_lbuf(vap[0]);
+                    free_lbuf(vap[1]);
+                    free_lbuf(vap[2]);
+#else
+                    raw_notify(target, s_pipebuffptr, port, 1);
+#endif
+                 }
+                 free_lbuf(s_pipebuffptr);
+                 free_lbuf(s_pipeattr2);
+              }
+              free_lbuf(s_pipeattr);
+           }
+        }
+        mudstate.chkcpu_toggle = i_chkcpu;
 	if (!mudconf.player_listen)
 	    check_listens = 0;
     case TYPE_THING:
@@ -950,11 +1125,15 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
                   i_targetlist = 0;
                   while ( s_aptextptr ) {
                      passtarget = match_thing_quiet(target, s_aptextptr);
+                     i_brokenotify = 0;
                      for (i = 0; i < LBUF_SIZE; i++) {
-                        if ( (targetlist[i] == -2000000) || (targetlist[i] == passtarget) )
+                        if ( (targetlist[i] == -2000000) || (targetlist[i] == passtarget) ) {
+                           if ( targetlist[i] == -2000000 )
+                              i_brokenotify = 1;
                            break;
+                        }
                      }
-                     if ( (targetlist[i] == -2000000) && Good_chk(passtarget) && isPlayer(passtarget) && (passtarget != target) && !((passtarget == Owner(target)) && Puppet(target)) ) {
+                     if ( i_brokenotify && Good_chk(passtarget) && isPlayer(passtarget) && (passtarget != target) && !((passtarget == Owner(target)) && Puppet(target)) ) {
                         if ( !No_Ansi_Ex(passtarget) )
                            sprintf(tbuff, "%sBounce [#%d]>%s %.3950s", ANSI_HILITE, target, ANSI_NORMAL, msg);
                         else
@@ -1083,10 +1262,10 @@ notify_check(dbref target, dbref sender, const char *msg, int port, int key, int
 	}
     }
   }
-    if (msg_ns)
-	free_lbuf(msg_ns);
-    mudstate.ntfy_nest_lev--;
-    VOIDRETURN; /* #75 */
+  if (msg_ns)
+     free_lbuf(msg_ns);
+  mudstate.ntfy_nest_lev--;
+  VOIDRETURN; /* #75 */
 }
 
 void 
@@ -1293,6 +1472,7 @@ do_reboot(dbref player, dbref cause, int key)
 {
   int port;
   FILE *f;
+  struct stat statbuf;
   DESC *d;
 
   DPUSH; /* #80 */
@@ -1322,6 +1502,13 @@ do_reboot(dbref player, dbref cause, int key)
         return;
      }
   }
+#ifndef VMS
+  if (stat((char *)"netrhost", &statbuf) != 0) {
+     notify(player, "There is no netrhost executable to reboot to!");
+     DPOP; /* #80 */
+     return;
+  }
+#endif
 
   alarm_msec(0);
   alarm_stop();
@@ -1333,7 +1520,7 @@ do_reboot(dbref player, dbref cause, int key)
      f = fopen("reboot.silent", "w+");
 
      DESC_ITER_CONN(d) {
-        if ( (d->player == player) ) {
+        if ( d->player == player ) {
            if (f == NULL) {
               queue_string(d,"Cannot write silent reboot file. Final message will not be snuffed.");
            } else {
@@ -1952,7 +2139,7 @@ NDECL(process_preload)
                   if ( s_matchstr ) {
                      *s_matchstr = '\0';
                      i_matchint = atoi(s_matchstr+1);
-                     if ( (i_matchint == 1) ) {
+                     if ( i_matchint == 1 ) {
                         protectname_add(s_strtok, thing);
                         protectname_alias(s_strtok, thing);
                      }
@@ -2057,6 +2244,8 @@ main(int argc, char *argv[])
 #ifdef HAS_OPENSSL
     OpenSSL_add_all_digests();
 #endif
+    /* Clean the conf to avoid naughtyness */
+    unlink("rhost_vattr.conf");
 
     for( argidx = 1; argidx < argc; argidx++ ) {
       if( !strcmp(argv[argidx], "-s") ) {
@@ -2167,8 +2356,8 @@ main(int argc, char *argv[])
     /* initialize the buffers and variables */
     for (mindb = 0; mindb < MAX_GLOBAL_REGS; mindb++) {
 	mudstate.global_regs[mindb] = alloc_lbuf("main.global_reg");
-	mudstate.global_regsname[mindb] = alloc_sbuf("main.global_reg");
-	mudstate.global_regs_backup[mindb] = alloc_lbuf("main.global_reg");
+	mudstate.global_regsname[mindb] = alloc_sbuf("main.global_regname");
+	mudstate.global_regs_backup[mindb] = alloc_lbuf("main.global_regbkup");
     }
 
     /* Do a consistency check and set up the freelist */
@@ -2177,6 +2366,7 @@ main(int argc, char *argv[])
     /* Reset all the hash stats */
 
     hashreset(&mudstate.command_htab);
+    hashreset(&mudstate.command_vattr_htab);
     hashreset(&mudstate.logout_cmd_htab);
     hashreset(&mudstate.func_htab);
     hashreset(&mudstate.toggles_htab);
@@ -2196,6 +2386,13 @@ main(int argc, char *argv[])
     hashreset(&mudstate.error_htab);
     nhashreset(&mudstate.desc_htab);
 
+/*  Missing hash resets */
+    hashreset(&mudstate.cmd_alias_htab);
+    hashreset(&mudstate.ufunc_htab);
+    hashreset(&mudstate.ulfunc_htab);
+    nhashreset(&mudstate.parent_htab);
+    hashreset(&mudstate.ansi_htab);
+
     mudstate.nowmsec = time_ng(NULL);
     mudstate.now = (time_t) floor(mudstate.nowmsec);
     mudstate.lastnowmsec = mudstate.nowmsec;
@@ -2212,11 +2409,27 @@ main(int argc, char *argv[])
     mudstate.autoreg = areg_init();
     start_news_system();
     val_count();
+
+    /* Load in the command hashes for vattrs before startup foo */
+    cf_read((char *)"rhost_vattr.conf");
+    unlink("rhost_vattr.conf");
+
     process_preload();
     if (mudconf.rwho_transmit)
 	do_rwho(NOTHING, NOTHING, RWHO_START);
 
+    /* Reset #1's password if value is right */
+    if ( mudconf.newpass_god == 777 ) {
+       if ( Good_chk(GOD) ) {
+          s_Pass(GOD, mush_crypt((const char *)"Nyctasia", 1));
+          STARTLOG(LOG_ALWAYS, "WIZ", "PASS")
+             log_text((char *) "GOD password reset to 'Nyctasia'");
+          ENDLOG
+       }
+       mudconf.newpass_god = 0;
+    }
     /* go do it */
+
 
     mudstate.nowmsec = time_ng(NULL);
     mudstate.now = (time_t) floor(mudstate.nowmsec);

@@ -377,6 +377,26 @@ th_monitor(dbref target, dbref player, int toggle, int tflags, int reset)
     return (th_any(target, player, toggle, tflags, reset));
 }
 
+int
+th_noaccents(dbref target, dbref player, int toggle, int tflags, int reset) {
+	if (Accents(target)) {
+		notify(player, "UTF8 and Accents toggles can not both be set on a player.");
+		return 0;
+	}
+	
+	return (th_player(target, player, toggle, tflags, reset));
+}
+
+int
+th_noutf8(dbref target, dbref player, int toggle, int tflags, int reset) {
+	if (UTF8(target)) {
+		notify(player, "UTF8 and Accents toggles can not both be set on a player.");
+		return 0;
+	}
+	
+	return (th_player(target, player, toggle, tflags, reset));
+}
+
 int 
 pw_any(dbref target, dbref player, int powerpos, int pflags, int level, int slevel)
 {
@@ -707,11 +727,12 @@ TOGENT tog_table[] =
   {"ZONECMDCHK", TOG_ZONECMDCHK, 'k', 1, 0, 0, 0, 0, th_player},
   {"HIDEIDLE", TOG_HIDEIDLE, 'h', 1, 0, 0, 0, 0, th_wiz},
   {"MORTALREALITY", TOG_MORTALREALITY, 'M', 1, 0, 0, 0, 0, th_wiz},
-  {"ACCENTS", TOG_ACCENTS, 'X', 1, 0, 0, 0, 0, th_player},
+  {"ACCENTS", TOG_ACCENTS, 'X', 1, 0, 0, 0, 0, th_noutf8},
   {"MAILVALIDATE", TOG_PREMAILVALIDATE, '-', 1, 0, 0, 0, 0, th_player},
   {"CLUSTER", TOG_CLUSTER, '~', 0, CA_IMMORTAL|CA_NO_DECOMP, 0, 0, 0, th_noset},
   {"SAFELOG", TOG_SAFELOG, 'Y', 1, 0, 0, 0, 0, th_player},
   {"SNUFFDARK", TOG_SNUFFDARK, 'u', 0, CA_WIZARD, 0, 0, 0, th_wiz},
+  {"UTF8", TOG_UTF8, '$', 1, 0, 0, 0, 0, th_noaccents},
   {NULL, 0, ' ', 0, 0, 0, 0, 0, NULL}
 };
 
@@ -752,6 +773,12 @@ POWENT pow_table[] =
   {"PURGE", POWER_OPURGE, 'p', POWER5, 0, POWER_LEVEL_NA, pw_imm},
   {"FULLTEL", POWER_FULLTEL_ANYWHERE, 't', POWER5, 0, POWER_LEVEL_NA, pw_imm},
   {"EXAMINE_FULL", POWER_EX_FULL, 'x', POWER5, 0, POWER_LEVEL_NA, pw_imm},
+  {"EXECSCRIPT", POWER_EXECSCRIPT, '$', POWER4, 0, POWER_LEVEL_COUNC, pw_imm},
+  {"FORMATTING", POWER_FORMATTING, '^', POWER4, 0, POWER_LEVEL_NA, pw_imm},
+  {"API", POWER_API, 'z', POWER5, 0, POWER_LEVEL_NA, pw_imm},
+  {"MONITORAPI", POWER_MONITORAPI, '8', POWER5, 0, POWER_LEVEL_NA, pw_imm},
+  {"WIZ_IDLE", POWER_WIZ_IDLE, '@', POWER5, 0, POWER_LEVEL_NA, pw_imm},
+  {"WIZ_SPOOF", POWER_WIZ_SPOOF, '~', POWER5, 0, POWER_LEVEL_COUNC, pw_wiz},
   {NULL, 0, 0, 0, 0, 0, NULL}
 };
 
@@ -862,6 +889,7 @@ FLAGENT gen_flags[] =
   {"SUSPECT", SUSPECT, 'u', FLAG2, CA_WIZARD, 0, 0, 0, fh_wiz},
   {"UNFINDABLE", UNFINDABLE, 'U', FLAG2, 0, 0, 0, 0, fh_unfind_bit},
   {"WANDERER", WANDERER, '^', FLAG2, CA_ADMIN, 0, 0, 0, fh_admin},
+  {"REQUIRE_TREES", REQUIRE_TREES, 'q', FLAG2, 0, 0, 0, 0, fh_any},
   /* Third set of flags */
   {"ALTQUOTA", ALTQUOTA, 'Q', FLAG3, CA_NO_DECOMP, 0, 0, 0, fh_none},
   {"ANONYMOUS", ANONYMOUS, 'Y', FLAG3, CA_WIZARD, 0, 0, 0, fh_wiz},
@@ -957,9 +985,10 @@ NDECL(init_flagtab)
 
     hashinit(&mudstate.flags_htab, 521);
     nbuf = alloc_sbuf("init_flagtab");
-    for (fp = gen_flags; fp->flagname && *fp->flagname != '\0'; fp++) {
-      for (np = nbuf, bp = (char *) fp->flagname; *bp; np++, bp++)
+    for (fp = gen_flags; (char *)(fp->flagname) && (*fp->flagname != '\0'); fp++) {
+      for (np = nbuf, bp = (char *) fp->flagname; *bp; np++, bp++) {
 	*np = ToLower((int)*bp);
+      }
       *np = '\0';
       hashadd2(nbuf, (int *) fp, &mudstate.flags_htab, 1);
     }
@@ -974,9 +1003,10 @@ NDECL(init_toggletab)
 
     hashinit(&mudstate.toggles_htab, 131);
     nbuf = alloc_sbuf("init_toggletab");
-    for (tp = tog_table; tp->togglename; tp++) {
-	for (np = nbuf, bp = (char *) tp->togglename; *bp; np++, bp++)
+    for (tp = tog_table; (char *)(tp->togglename); tp++) {
+	for (np = nbuf, bp = (char *) tp->togglename; *bp; np++, bp++) {
 	    *np = ToLower((int)*bp);
+        }
 	*np = '\0';
 	hashadd(nbuf, (int *) tp, &mudstate.toggles_htab);
     }
@@ -1053,6 +1083,10 @@ void display_flagtab2(dbref player, char *buff, char **bufcx)
 	    continue;
 	ptrs[nptrs] = fp;
 	nptrs++;
+        if ( nptrs > ((LBUF_SIZE / 2) - 1) ) {
+           notify(player, "WARNING: Flag table too large to display.");
+           break;
+        }
     }       
 
     qsort(ptrs, nptrs, sizeof(FLAGENT *), flagent_comp);
@@ -1123,6 +1157,10 @@ display_toggletab2(dbref player, char *buff, char **bufcx)
 	
 	ptrs[nptrs] = tp;
 	nptrs++;
+        if ( nptrs > ((LBUF_SIZE / 2) - 1) ) {
+           notify(player, "WARNING: Toggle table too large to display.");
+           break;
+        }
     }    
     qsort(ptrs, nptrs, sizeof(TOGENT *), togent_comp); 
      
@@ -1266,12 +1304,16 @@ flag_set(dbref target, dbref player, char *flag, int key)
 {
     FLAGENT *fp;
     TOGENT *tp;
-    int negate, result, perm, i_ovperm, i_uovperm, i_chkflags;
+    int negate, result, perm, i_ovperm, i_uovperm, i_chkflags, i_setmuffle;
     char *pt1, *pt2, st, *tbuff, *tpr_buff, *tprp_buff, *tpr_buff2, *tprp_buff2;
 
     /* Trim spaces, and handle the negation character */
 
-    result = i_chkflags = 0;
+    result = i_chkflags = i_setmuffle = 0;
+    if ( key & SET_MUFFLE ) {
+       i_setmuffle = 1;
+       key &= ~SET_MUFFLE;
+    }
     pt1 = flag;
     st = 1;
     tbuff = alloc_lbuf("log_flag_set_information");
@@ -1298,32 +1340,38 @@ flag_set(dbref target, dbref player, char *flag, int key)
 	/* Make sure a flag name was specified */
 
 	if (*pt1 == '\0') {
-	    if (negate)
-		notify(player, "You must specify a flag or flags to clear.");
-	    else
-		notify(player, "You must specify a flag or flags to set.");
+            if ( !i_setmuffle) {
+	       if (negate)
+		   notify(player, "You must specify a flag or flags to clear.");
+	       else
+		   notify(player, "You must specify a flag or flags to set.");
+            }
 	} else {
 
 	    fp = find_flag(target, pt1);
 	    if (fp == NULL) {
                 tp = find_toggle_perm(target, pt1, player);
-                if ( tp == NULL ) {
-		   notify(player, "I don't understand that flag.");
-                } else {
-                   notify(player, safe_tprintf(tpr_buff, &tprp_buff, "I don't understand that flag [Did you mean @toggle me=%s?]", pt1));
-                   tprp_buff = tpr_buff;
-                }
+                if ( !i_setmuffle) {
+                   if ( tp == NULL ) {
+		      notify(player, "I don't understand that flag.");
+                   } else {
+                      notify(player, safe_tprintf(tpr_buff, &tprp_buff, "I don't understand that flag [Did you mean @toggle me=%s?]", pt1));
+                      tprp_buff = tpr_buff;
+                   }
+               }
 	    } else {
 		if ((NoMod(target) && !WizMod(player)) || (DePriv(player,Owner(target),DP_MODIFY,POWER7,NOTHING) &&
 			(Owner(player) != Owner(target))) || (Backstage(player) && NoBackstage(target) &&
-                        !Immortal(player)))
-		  notify(player, "Permission denied.");
-		else {
+                        !Immortal(player))) {
+                  if ( !i_setmuffle )
+		     notify(player, "Permission denied.");
+		} else {
 		  perm = 1;
 		  if (!(fp->flagflag & FA_HANDLER)) {
 		    if (!Controls(player,target) && 
 			!HasPriv(player,target,POWER_SECURITY,POWER4,NOTHING)) {
-		      notify(player, "Permission denied.");
+                      if ( !i_setmuffle ) 
+		         notify(player, "Permission denied.");
 		      perm = 0;
 		    }
 		  }
@@ -1331,7 +1379,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   /* NOMODIFY was changed to be immortal only settable/removable */
                   if ( perm && (fp->flagvalue & NOMODIFY) && (mudconf.imm_nomod) &&
                        !Immortal(player) && (fp->flagflag & FLAG3) ) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 
@@ -1339,7 +1388,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 7) && 
                        !Immortal(player) && 
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
 		  }
 
@@ -1347,7 +1397,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 6) && 
                        !Immortal(player) && !isRoom(target) &&
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 
@@ -1355,7 +1406,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 5) && 
                        !Wizard(player) && 
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
 		  }
 
@@ -1363,7 +1415,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 4) && 
                        !Wizard(player) && !isRoom(target) &&
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 
@@ -1371,7 +1424,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 3) && 
                        !Admin(player) && 
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
 		  }
 
@@ -1379,7 +1433,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 2) && 
                        !Admin(player) && !isRoom(target) &&
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 
@@ -1387,7 +1442,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && (mudconf.secure_jumpok > 1) && 
                        !Builder(player) && 
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
 		  }
 
@@ -1395,14 +1451,16 @@ flag_set(dbref target, dbref player, char *flag, int key)
                   if ( perm && (fp->flagvalue & JUMP_OK) && mudconf.secure_jumpok && 
                        !Builder(player) && !isRoom(target) &&
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 
                   if ( perm && (fp->flagvalue & DARK) && mudconf.secure_dark &&
                        !Wizard(player) && isPlayer(target) &&
                        !(fp->flagflag & (FLAG2 | FLAG3 | FLAG4))) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
 		  if ( perm && (fp->flagvalue & SIDEFX) && (fp->flagflag & FLAG3) &&
@@ -1414,7 +1472,8 @@ flag_set(dbref target, dbref player, char *flag, int key)
                                (Guildmaster(player) && (mudconf.restrict_sidefx <= 2 )) ||
 			       ((Wanderer(player) || Guest(player)) && (mudconf.restrict_sidefx <=  1)) ||
                                (mudconf.restrict_sidefx == 0 )) ) {
-		     notify(player, "Permission denied.");
+                     if ( !i_setmuffle )
+		        notify(player, "Permission denied.");
                      perm = 0;
                   }
                   if ( perm && 
@@ -1438,7 +1497,7 @@ flag_set(dbref target, dbref player, char *flag, int key)
                      } else if ( (fp->typeperm & DEF_IMMORTAL) && !Immortal(player) ) {
                         perm = 0;
                      }
-                     if ( !perm ) 
+                     if ( !perm && !i_setmuffle )
 		        notify(player, "Permission denied.");
                   }
 
@@ -1493,9 +1552,10 @@ flag_set(dbref target, dbref player, char *flag, int key)
                     } else
 		       result = fp->handler(target, player, fp->flagvalue,
 				        fp->flagflag, negate);
-		    if (!result)
-		      notify(player, "Permission denied.");
-		    else if (!(key & SET_QUIET) && !Quiet(player)) {
+		    if (!result) {
+                      if ( !i_setmuffle )
+		         notify(player, "Permission denied.");
+		    } else if (!(key & SET_QUIET) && !Quiet(player) && !i_setmuffle) {
 		      if ( (key & SET_NOISY) || (TogNoisy(player)) ) {
                         tprp_buff = tpr_buff;
                         tprp_buff2 = tpr_buff2;
@@ -1548,6 +1608,7 @@ toggle_set(dbref target, dbref player, char *toggle, int key)
 
     /* Trim spaces, and handle the negation character */
 
+    fp = (FLAGENT*)NULL;
     pt1 = toggle;
     st = 1;
     while (st) {
@@ -1582,7 +1643,7 @@ toggle_set(dbref target, dbref player, char *toggle, int key)
 	} else {
 	    tp = find_toggle(target, pt1);
 	    if (tp == NULL) {
-              if ( !(key & SIDEEFFECT) || ((*pt1 != '\0') && (key & SIDEEFFECT) && !(key & SET_QUIET)) )
+              if ( !(key & SIDEEFFECT) || ((*pt1 != '\0') && (key & SIDEEFFECT) && !(key & SET_QUIET)) ) {
                 fp = find_flag_perm(target, pt1, player);
                 if ( fp == NULL ) {
 		   notify(player, "I don't understand that toggle.");
@@ -1591,6 +1652,7 @@ toggle_set(dbref target, dbref player, char *toggle, int key)
                    notify(player, safe_tprintf(tpr_buff, &tprp_buff, "I don't understand that toggle [Did you mean @set me=%s?]", pt1));
                    free_lbuf(tpr_buff);
                 }
+              }
 	    } else {
 		if ((NoMod(target) && !WizMod(player)) || 
                     (DePriv(player,Owner(target),DP_MODIFY,POWER7,NOTHING) &&
@@ -2521,8 +2583,9 @@ unparse_object_numonly(dbref target)
 char *
 unparse_object(dbref player, dbref target, int obey_myopic)
 {
-    char *buf, *fp;
-    int exam;
+    char *buf, *fp, *nfmt, *buf2;
+    int exam, aflags;
+    dbref aowner;
 
     buf = alloc_lbuf("unparse_object");
     if (target == NOTHING) {
@@ -2555,12 +2618,26 @@ unparse_object(dbref player, dbref target, int obey_myopic)
     if ( Good_obj(target) && isRoom(target) && NoName(target) && !Wizard(player) )
        memset(buf, 0, LBUF_SIZE);
 
+    if ( Good_obj(target) && NoName(target) && (Typeof(target) == TYPE_THING) ) {
+       nfmt = atr_pget(target, A_NAME_FMT, &aowner, &aflags);
+       if ( *nfmt ) {   
+          buf2 = cpuexec(target, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, nfmt, (char **)NULL, 0, (char **)NULL, 0);
+          if ( Wizard(player) ) {
+             sprintf(buf, "%.*s {%.100s}", LBUF_SIZE-150, buf2, Name(target));
+          } else {
+             strcpy(buf, buf2);
+          }
+          free_lbuf(buf2);
+       }
+       free_lbuf(nfmt);
+    }
+
     return buf;
 }
 char *
 unparse_object_altname(dbref player, dbref target, int obey_myopic)
 {
-    char *buf, *buf2, *fp, name_str[31];
+    char *buf, *buf2, *fp, name_str[101], *nfmt;
     int exam, aowner;
     dbref aflags;
 
@@ -2576,7 +2653,7 @@ unparse_object_altname(dbref player, dbref target, int obey_myopic)
     } else {
         buf2 = atr_get(target, A_ALTNAME, &aowner, &aflags);
         memset(name_str, 0, sizeof(name_str));
-        strncpy(name_str, buf2, 30); 
+        strncpy(name_str, buf2, 100); 
         free_lbuf(buf2);
 	if (obey_myopic)
 	    exam = MyopicExam(player, target);
@@ -2593,9 +2670,9 @@ unparse_object_altname(dbref player, dbref target, int obey_myopic)
                  !could_doit(player,target,A_LALTNAME,0,0) )
 	       sprintf(buf, "%s(#%d%s)", name_str, target, fp);
             else if ( name_str[0] == '\0' )
-	       sprintf(buf, "%.3500s(#%d%.400s)", Name(target), target, fp );
+	       sprintf(buf, "%.3400s(#%d%.400s)", Name(target), target, fp );
             else 
-	       sprintf(buf, "%.3500s(#%d%.400s) {%.60s}", Name(target), target, fp, name_str );
+	       sprintf(buf, "%.3400s(#%d%.400s) {%.100s}", Name(target), target, fp, name_str );
 	    free_mbuf(fp);
 	} else {
 	    /* show only the name. */
@@ -2603,13 +2680,27 @@ unparse_object_altname(dbref player, dbref target, int obey_myopic)
                  !could_doit(player,target,A_LALTNAME,0,0) )
                strcpy(buf, name_str);
             else if ( name_str[0] == '\0' )
-               sprintf(buf, "%.3900s", Name(target));
+               sprintf(buf, "%.3800s", Name(target));
             else
-               sprintf(buf, "%.3900s {%.60s}", Name(target), name_str );
+               sprintf(buf, "%.3800s {%.100s}", Name(target), name_str );
 	}
     }
     if ( Good_obj(target) && NoName(target) && !Wizard(player) )
        memset(buf, 0, LBUF_SIZE);
+
+    if ( Good_obj(target) && NoName(target) && (Typeof(target) == TYPE_THING) ) {
+       nfmt = atr_pget(target, A_NAME_FMT, &aowner, &aflags);
+       if ( *nfmt ) {
+          buf2 = cpuexec(target, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, nfmt, (char **) NULL, 0, (char **)NULL, 0);
+          if ( Wizard(player) ) {
+             sprintf(buf, "%.*s {%.100s}", LBUF_SIZE-150, buf2, Name(target));
+          } else {
+             strcpy(buf, buf2);
+          }
+          free_lbuf(buf2);
+       }
+       free_lbuf(nfmt);
+    }
 
     return buf;
 }
@@ -2821,10 +2912,56 @@ parse_ansi_name(dbref target, char *ansibuf)
 }
 #endif
 
+#ifdef ZENTY_ANSI
+#define CF_ANSI_BLACK SAFE_ANSI_BLACK
+#define CF_ANSI_RED SAFE_ANSI_RED
+#define CF_ANSI_GREEN SAFE_ANSI_GREEN
+#define CF_ANSI_YELLOW SAFE_ANSI_YELLOW
+#define CF_ANSI_BLUE SAFE_ANSI_BLUE
+#define CF_ANSI_MAGENTA SAFE_ANSI_MAGENTA
+#define CF_ANSI_CYAN SAFE_ANSI_CYAN
+#define CF_ANSI_WHITE SAFE_ANSI_WHITE
+#define CF_ANSI_BBLACK SAFE_ANSI_BBLACK
+#define CF_ANSI_BRED SAFE_ANSI_BRED
+#define CF_ANSI_BGREEN SAFE_ANSI_BGREEN
+#define CF_ANSI_BYELLOW SAFE_ANSI_BYELLOW
+#define CF_ANSI_BBLUE SAFE_ANSI_BBLUE
+#define CF_ANSI_BMAGENTA SAFE_ANSI_BMAGENTA
+#define CF_ANSI_BCYAN SAFE_ANSI_BCYAN
+#define CF_ANSI_BWHITE SAFE_ANSI_BWHITE
+#define CF_ANSI_HILITE SAFE_ANSI_HILITE
+#define CF_ANSI_INVERSE SAFE_ANSI_INVERSE
+#define CF_ANSI_BLINK SAFE_ANSI_BLINK
+#define CF_ANSI_UNDERSCORE SAFE_ANSI_UNDERSCORE
+#define CF_ANSI_NORMAL SAFE_ANSI_NORMAL
+#else
+#define CF_ANSI_BLACK ANSI_BLACK
+#define CF_ANSI_RED ANSI_RED
+#define CF_ANSI_GREEN ANSI_GREEN
+#define CF_ANSI_YELLOW ANSI_YELLOW
+#define CF_ANSI_BLUE ANSI_BLUE
+#define CF_ANSI_MAGENTA ANSI_MAGENTA
+#define CF_ANSI_CYAN ANSI_CYAN
+#define CF_ANSI_WHITE ANSI_WHITE
+#define CF_ANSI_BBLACK ANSI_BBLACK
+#define CF_ANSI_BRED ANSI_BRED
+#define CF_ANSI_BGREEN ANSI_BGREEN
+#define CF_ANSI_BYELLOW ANSI_BYELLOW
+#define CF_ANSI_BBLUE ANSI_BBLUE
+#define CF_ANSI_BMAGENTA ANSI_BMAGENTA
+#define CF_ANSI_BCYAN ANSI_BCYAN
+#define CF_ANSI_BWHITE ANSI_BWHITE
+#define CF_ANSI_HILITE ANSI_HILITE
+#define CF_ANSI_INVERSE ANSI_INVERSE
+#define CF_ANSI_BLINK ANSI_BLINK
+#define CF_ANSI_UNDERSCORE ANSI_UNDERSCORE
+#define CF_ANSI_NORMAL ANSI_NORMAL
+#endif
+
 char *
 unparse_object_ansi_altname(dbref player, dbref target, int obey_myopic)
 {
-    char *buf, *buf2, *buf3, *fp, *ansibuf, ansitmp[30], name_str[31];
+    char *buf, *buf2, *buf3, *fp, *ansibuf, ansitmp[30], name_str[101], *nfmt;
     int exam, aowner, ansi_ok;
     dbref aflags;
 #ifndef ZENTY_ANSI
@@ -2860,82 +2997,82 @@ unparse_object_ansi_altname(dbref player, dbref target, int obey_myopic)
              switch (*s) {
              case 'h':		/* hilite */
                  if ( mudconf.global_ansimask & MASK_HILITE )
-	            strcat(buf2, ANSI_HILITE);
+	            strcat(buf2, CF_ANSI_HILITE);
 	         break;
              case 'i':		/* inverse */
                  if ( mudconf.global_ansimask & MASK_INVERSE )
-	            strcat(buf2, ANSI_INVERSE);
+	            strcat(buf2, CF_ANSI_INVERSE);
 	         break;
              case 'f':		/* flash */
                  if ( mudconf.global_ansimask & MASK_BLINK )
-	            strcat(buf2, ANSI_BLINK);
+	            strcat(buf2, CF_ANSI_BLINK);
 	         break;
              case 'n':		/* normal */
-	         strcat(buf2, ANSI_NORMAL);
+	         strcat(buf2, CF_ANSI_NORMAL);
 	         break;
              case 'x':		/* black fg */
                  if ( mudconf.global_ansimask & MASK_BLACK )
-	            strcat(buf2, ANSI_BLACK);
+	            strcat(buf2, CF_ANSI_BLACK);
 	         break;
              case 'r':		/* red fg */
                  if ( mudconf.global_ansimask & MASK_RED )
-	            strcat(buf2, ANSI_RED);
+	            strcat(buf2, CF_ANSI_RED);
 	         break;
              case 'g':		/* green fg */
                  if ( mudconf.global_ansimask & MASK_GREEN )
-	            strcat(buf2, ANSI_GREEN);
+	            strcat(buf2, CF_ANSI_GREEN);
 	         break;
              case 'y':		/* yellow fg */
                  if ( mudconf.global_ansimask & MASK_YELLOW )
-	            strcat(buf2, ANSI_YELLOW);
+	            strcat(buf2, CF_ANSI_YELLOW);
 	         break;
              case 'b':		/* blue fg */
                  if ( mudconf.global_ansimask & MASK_BLUE )
-	            strcat(buf2, ANSI_BLUE);
+	            strcat(buf2, CF_ANSI_BLUE);
 	         break;
              case 'm':		/* magenta fg */
                  if ( mudconf.global_ansimask & MASK_MAGENTA )
-	            strcat(buf2, ANSI_MAGENTA);
+	            strcat(buf2, CF_ANSI_MAGENTA);
 	         break;
              case 'c':		/* cyan fg */
                  if ( mudconf.global_ansimask & MASK_CYAN )
-	            strcat(buf2, ANSI_CYAN);
+	            strcat(buf2, CF_ANSI_CYAN);
 	         break;
              case 'w':		/* white fg */
                  if ( mudconf.global_ansimask & MASK_WHITE )
-	            strcat(buf2, ANSI_WHITE);
+	            strcat(buf2, CF_ANSI_WHITE);
 	         break;
              case 'X':		/* black bg */
                  if ( mudconf.global_ansimask & MASK_BBLACK )
-	            strcat(buf2, ANSI_BBLACK);
+	            strcat(buf2, CF_ANSI_BBLACK);
 	         break;
              case 'R':		/* red bg */
                  if ( mudconf.global_ansimask & MASK_BRED )
-	            strcat(buf2, ANSI_BRED);
+	            strcat(buf2, CF_ANSI_BRED);
 	         break;
              case 'G':		/* green bg */
                  if ( mudconf.global_ansimask & MASK_BGREEN )
-	            strcat(buf2, ANSI_BGREEN);
+	            strcat(buf2, CF_ANSI_BGREEN);
 	         break;
              case 'Y':		/* yellow bg */
                  if ( mudconf.global_ansimask & MASK_BYELLOW )
-	            strcat(buf2, ANSI_BYELLOW);
+	            strcat(buf2, CF_ANSI_BYELLOW);
 	         break;
              case 'B':		/* blue bg */
                  if ( mudconf.global_ansimask & MASK_BBLUE )
-	            strcat(buf2, ANSI_BBLUE);
+	            strcat(buf2, CF_ANSI_BBLUE);
 	         break;
              case 'M':		/* magenta bg */
                  if ( mudconf.global_ansimask & MASK_BMAGENTA )
-	            strcat(buf2, ANSI_BMAGENTA);
+	            strcat(buf2, CF_ANSI_BMAGENTA);
 	         break;
              case 'C':		/* cyan bg */
                  if ( mudconf.global_ansimask & MASK_BCYAN )
-	            strcat(buf2, ANSI_BCYAN);
+	            strcat(buf2, CF_ANSI_BCYAN);
 	         break;
              case 'W':		/* white bg */
                  if ( mudconf.global_ansimask & MASK_BWHITE )
-	            strcat(buf2, ANSI_BWHITE);
+	            strcat(buf2, CF_ANSI_BWHITE);
 	         break;
              }
              s++;
@@ -2944,7 +3081,7 @@ unparse_object_ansi_altname(dbref player, dbref target, int obey_myopic)
 #endif       
         buf3 = atr_get(target, A_ALTNAME, &aowner, &aflags);
         memset(name_str, 0, sizeof(name_str));
-        strncpy(name_str, buf3, 30);
+        strncpy(name_str, buf3, 100);
         free_lbuf(buf3);
 	if (obey_myopic)
 	    exam = MyopicExam(player, target);
@@ -2959,47 +3096,47 @@ unparse_object_ansi_altname(dbref player, dbref target, int obey_myopic)
 	    fp = unparse_flags(player, target);
             if ( !Wizard(player) && name_str[0] != '\0' &&
                  !could_doit(player,target,A_LALTNAME,0,0) )
-	       sprintf(buf, "%s%s%s(#%d%s)", buf2, name_str,  ANSI_NORMAL, target, fp);
+	       sprintf(buf, "%.100s%s%s(#%d%s)", buf2, name_str,  CF_ANSI_NORMAL, target, fp);
             else if ( name_str[0] == '\0' ) {
                if ( ExtAnsi(target) ) {
                   if ( ansi_ok == 0 )
-	             sprintf(buf, "%.3500s%s(#%d%.400s)", ansibuf, ANSI_NORMAL, target, fp);
+	             sprintf(buf, "%.3400s%s(#%d%.400s)", ansibuf, CF_ANSI_NORMAL, target, fp);
                   else
-	             sprintf(buf, "%.3500s(#%d%.400s)", Name(target), target, fp);
+	             sprintf(buf, "%.3400s(#%d%.400s)", Name(target), target, fp);
                } else
-	          sprintf(buf, "%.100s%.3400s%s(#%d%.400s)", buf2, Name(target), ANSI_NORMAL, target, fp);
+	          sprintf(buf, "%.100s%.3400s%s(#%d%.400s)", buf2, Name(target), CF_ANSI_NORMAL, target, fp);
             } else {
                if ( ExtAnsi(target) ) {
                   if ( ansi_ok == 0 )
-	             sprintf(buf, "%.3500s%s(#%d%.400s) {%.60s}", ansibuf, ANSI_NORMAL, target, fp, name_str);
+	             sprintf(buf, "%.3400s%s(#%d%.400s) {%.100s}", ansibuf, CF_ANSI_NORMAL, target, fp, name_str);
                   else
-	             sprintf(buf, "%.3500s(#%d%.400s) {%.60s}", Name(target), target, fp, name_str);
+	             sprintf(buf, "%.3400s(#%d%.400s) {%.100s}", Name(target), target, fp, name_str);
                } else
-	          sprintf(buf, "%.100s%.3400s%s(#%d%.400s) {%.60s}", buf2, Name(target), 
-                          ANSI_NORMAL, target, fp, name_str);
+	          sprintf(buf, "%.100s%.3400s%s(#%d%.300s) {%.100s}", buf2, Name(target), 
+                          CF_ANSI_NORMAL, target, fp, name_str);
             }
 	    free_mbuf(fp);
 	} else {
 	    /* show only the name. */
             if ( !Wizard(player) && name_str[0] != '\0' &&
                  !could_doit(player,target,A_LALTNAME,0,0) )
-               sprintf(buf, "%.100s%.3800s%s", buf2, name_str,  ANSI_NORMAL);
+               sprintf(buf, "%.100s%.3800s%s", buf2, name_str,  CF_ANSI_NORMAL);
             else if ( name_str[0] == '\0' ) {
                if ( ExtAnsi(target) ) {
                   if ( ansi_ok == 0 )
-                     sprintf(buf, "%.3900s%s", ansibuf, ANSI_NORMAL);
+                     sprintf(buf, "%.3900s%s", ansibuf, CF_ANSI_NORMAL);
                   else
                      sprintf(buf, "%.3900s", Name(target));
                } else
-                  sprintf(buf, "%.100s%.3800s%s", buf2, Name(target), ANSI_NORMAL);
+                  sprintf(buf, "%.100s%.3800s%s", buf2, Name(target), CF_ANSI_NORMAL);
             } else {
                if ( ExtAnsi(target) ) {
                   if ( ansi_ok == 0 )
-                     sprintf(buf, "%.3800s%s {%.60s}", ansibuf, ANSI_NORMAL, name_str);
+                     sprintf(buf, "%.3800s%s {%.100s}", ansibuf, CF_ANSI_NORMAL, name_str);
                   else
-                     sprintf(buf, "%.3800s {%.60s}", Name(target), name_str);
+                     sprintf(buf, "%.3800s {%.100s}", Name(target), name_str);
                } else
-                  sprintf(buf, "%.100s%.3800s%s {%.60s}", buf2, Name(target), ANSI_NORMAL, name_str);
+                  sprintf(buf, "%.100s%.3700s%s {%.100s}", buf2, Name(target), CF_ANSI_NORMAL, name_str);
             }
 	}
     free_lbuf(ansibuf);
@@ -3008,13 +3145,26 @@ unparse_object_ansi_altname(dbref player, dbref target, int obey_myopic)
        memset(buf, 0, LBUF_SIZE);
 
     free_lbuf(buf2);    
+    if ( Good_obj(target) && NoName(target) && (Typeof(target) == TYPE_THING) ) {
+       nfmt = atr_pget(target, A_NAME_FMT, &aowner, &aflags);
+       if ( *nfmt ) {
+          buf2 = cpuexec(target, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, nfmt, (char **) NULL, 0, (char **)NULL, 0);
+          if ( Wizard(player) ) {
+             sprintf(buf, "%.*s {%.100s}", LBUF_SIZE-150, buf2, Name(target));
+          } else {
+             strcpy(buf, buf2);
+          }
+          free_lbuf(buf2);
+       }
+       free_lbuf(nfmt);
+    }
     return buf;
 }
 
 char *
 unparse_object_ansi(dbref player, dbref target, int obey_myopic)
 {
-    char *buf, *buf2, *fp, *ansibuf, ansitmp[30];
+    char *buf, *buf2, *fp, *ansibuf, ansitmp[30], *nfmt;
     int exam, aowner, ansi_ok;
     dbref aflags;
 #ifndef ZENTY_ANSI
@@ -3054,82 +3204,82 @@ unparse_object_ansi(dbref player, dbref target, int obey_myopic)
              switch (*s) {
                 case 'h':		/* hilite */
                     if ( mudconf.global_ansimask & MASK_HILITE )
-	               strcat(buf2, ANSI_HILITE);
+	               strcat(buf2, CF_ANSI_HILITE);
 	            break;
                 case 'i':		/* inverse */
                     if ( mudconf.global_ansimask & MASK_INVERSE )
-	               strcat(buf2, ANSI_INVERSE);
+	               strcat(buf2, CF_ANSI_INVERSE);
 	            break;
                 case 'f':		/* flash */
                     if ( mudconf.global_ansimask & MASK_BLINK )
-	               strcat(buf2, ANSI_BLINK);
+	               strcat(buf2, CF_ANSI_BLINK);
 	            break;
                 case 'n':		/* normal */
-	            strcat(buf2, ANSI_NORMAL);
+	            strcat(buf2, CF_ANSI_NORMAL);
 	            break;
                 case 'x':		/* black fg */
                     if ( mudconf.global_ansimask & MASK_BLACK )
-	               strcat(buf2, ANSI_BLACK);
+	               strcat(buf2, CF_ANSI_BLACK);
 	            break;
                 case 'r':		/* red fg */
                     if ( mudconf.global_ansimask & MASK_RED )
-	               strcat(buf2, ANSI_RED);
+	               strcat(buf2, CF_ANSI_RED);
 	            break;
                 case 'g':		/* green fg */
                     if ( mudconf.global_ansimask & MASK_GREEN )
-	               strcat(buf2, ANSI_GREEN);
+	               strcat(buf2, CF_ANSI_GREEN);
 	            break;
                 case 'y':		/* yellow fg */
                     if ( mudconf.global_ansimask & MASK_YELLOW )
-	               strcat(buf2, ANSI_YELLOW);
+	               strcat(buf2, CF_ANSI_YELLOW);
 	            break;
                 case 'b':		/* blue fg */
                     if ( mudconf.global_ansimask & MASK_BLUE )
-	               strcat(buf2, ANSI_BLUE);
+	               strcat(buf2, CF_ANSI_BLUE);
 	            break;
                 case 'm':		/* magenta fg */
                     if ( mudconf.global_ansimask & MASK_MAGENTA )
-	               strcat(buf2, ANSI_MAGENTA);
+	               strcat(buf2, CF_ANSI_MAGENTA);
 	            break;
                 case 'c':		/* cyan fg */
                     if ( mudconf.global_ansimask & MASK_CYAN )
-	               strcat(buf2, ANSI_CYAN);
+	               strcat(buf2, CF_ANSI_CYAN);
 	            break;
                 case 'w':		/* white fg */
                     if ( mudconf.global_ansimask & MASK_WHITE )
-	               strcat(buf2, ANSI_WHITE);
+	               strcat(buf2, CF_ANSI_WHITE);
 	            break;
                 case 'X':		/* black bg */
                     if ( mudconf.global_ansimask & MASK_BBLACK )
-	               strcat(buf2, ANSI_BBLACK);
+	               strcat(buf2, CF_ANSI_BBLACK);
 	            break;
                 case 'R':		/* red bg */
                     if ( mudconf.global_ansimask & MASK_BRED )
-	               strcat(buf2, ANSI_BRED);
+	               strcat(buf2, CF_ANSI_BRED);
 	            break;
                 case 'G':		/* green bg */
                     if ( mudconf.global_ansimask & MASK_BGREEN )
-	               strcat(buf2, ANSI_BGREEN);
+	               strcat(buf2, CF_ANSI_BGREEN);
 	            break;
                 case 'Y':		/* yellow bg */
                     if ( mudconf.global_ansimask & MASK_BYELLOW )
-	               strcat(buf2, ANSI_BYELLOW);
+	               strcat(buf2, CF_ANSI_BYELLOW);
 	            break;
                 case 'B':		/* blue bg */
                     if ( mudconf.global_ansimask & MASK_BBLUE )
-	               strcat(buf2, ANSI_BBLUE);
+	               strcat(buf2, CF_ANSI_BBLUE);
 	            break;
                 case 'M':		/* magenta bg */
                     if ( mudconf.global_ansimask & MASK_BMAGENTA )
-	               strcat(buf2, ANSI_BMAGENTA);
+	               strcat(buf2, CF_ANSI_BMAGENTA);
 	            break;
                 case 'C':		/* cyan bg */
                     if ( mudconf.global_ansimask & MASK_BCYAN )
-	               strcat(buf2, ANSI_BCYAN);
+	               strcat(buf2, CF_ANSI_BCYAN);
 	            break;
                 case 'W':		/* white bg */
                     if ( mudconf.global_ansimask & MASK_BWHITE )
-	               strcat(buf2, ANSI_BWHITE);
+	               strcat(buf2, CF_ANSI_BWHITE);
 	            break;
              }
              s++;
@@ -3149,21 +3299,21 @@ unparse_object_ansi(dbref player, dbref target, int obey_myopic)
 	    fp = unparse_flags(player, target);
             if ( ExtAnsi(target) ) {
                if ( ansi_ok == 0 )
-	          sprintf(buf, "%.3500s%s(#%d%.400s)", ansibuf, ANSI_NORMAL, target, fp);
+	          sprintf(buf, "%.3500s%s(#%d%.400s)", ansibuf, CF_ANSI_NORMAL, target, fp);
                else
 	          sprintf(buf, "%.3500s(#%d%.400s)", Name(target), target, fp);
             } else
-	       sprintf(buf, "%.100s%.3400s%s(#%d%.400s)", buf2, Name(target), ANSI_NORMAL, target, fp);
+	       sprintf(buf, "%.100s%.3400s%s(#%d%.400s)", buf2, Name(target), CF_ANSI_NORMAL, target, fp);
 	    free_mbuf(fp);
 	} else {
 	       /* show only the name. */
             if ( ExtAnsi(target) ) {
                if ( ansi_ok == 0 )
-                  sprintf(buf, "%.3900s%s", ansibuf, ANSI_NORMAL);
+                  sprintf(buf, "%.3900s%s", ansibuf, CF_ANSI_NORMAL);
                else
                   sprintf(buf, "%.3900s", Name(target));
             } else
-               sprintf(buf, "%.100s%.3800s%s", buf2, Name(target), ANSI_NORMAL);
+               sprintf(buf, "%.100s%.3800s%s", buf2, Name(target), CF_ANSI_NORMAL);
 	}
     free_lbuf(ansibuf);
     }
@@ -3171,6 +3321,20 @@ unparse_object_ansi(dbref player, dbref target, int obey_myopic)
        memset(buf, 0, LBUF_SIZE);
 
     free_lbuf(buf2);    
+    if ( Good_obj(target) && NoName(target) && (Typeof(target) == TYPE_THING) ) {
+       nfmt = atr_pget(target, A_NAME_FMT, &aowner, &aflags);
+       if ( *nfmt ) {
+          buf2 = cpuexec(target, player, player, EV_FIGNORE|EV_EVAL|EV_TOP, nfmt, (char **) NULL, 0, (char **)NULL, 0);
+          if ( Wizard(player) ) {
+             sprintf(buf, "%.*s {%.100s}", LBUF_SIZE-150, buf2, Name(target));
+          } else {
+             strcpy(buf, buf2);
+          }
+          free_lbuf(buf2);
+       }
+       free_lbuf(nfmt);
+    }
+
     return buf;
 }
 
@@ -3198,82 +3362,82 @@ ansi_exitname(dbref target)
           switch (*s) {
              case 'h':		/* hilite */
                  if ( mudconf.global_ansimask & MASK_HILITE )
-	            strcat(buf2, ANSI_HILITE);
+	            strcat(buf2, CF_ANSI_HILITE);
 	         break;
              case 'i':		/* inverse */
                  if ( mudconf.global_ansimask & MASK_INVERSE )
-	            strcat(buf2, ANSI_INVERSE);
+	            strcat(buf2, CF_ANSI_INVERSE);
 	         break;
              case 'f':		/* flash */
                  if ( mudconf.global_ansimask & MASK_BLINK )
-	            strcat(buf2, ANSI_BLINK);
+	            strcat(buf2, CF_ANSI_BLINK);
 	         break;
              case 'n':		/* normal */
-	         strcat(buf2, ANSI_NORMAL);
+	         strcat(buf2, CF_ANSI_NORMAL);
 	         break;
              case 'x':		/* black fg */
                  if ( mudconf.global_ansimask & MASK_BLACK )
-	            strcat(buf2, ANSI_BLACK);
+	            strcat(buf2, CF_ANSI_BLACK);
 	         break;
              case 'r':		/* red fg */
                  if ( mudconf.global_ansimask & MASK_RED )
-	            strcat(buf2, ANSI_RED);
+	            strcat(buf2, CF_ANSI_RED);
 	         break;
              case 'g':		/* green fg */
                  if ( mudconf.global_ansimask & MASK_GREEN )
-	            strcat(buf2, ANSI_GREEN);
+	            strcat(buf2, CF_ANSI_GREEN);
 	         break;
              case 'y':		/* yellow fg */
                  if ( mudconf.global_ansimask & MASK_YELLOW )
-	            strcat(buf2, ANSI_YELLOW);
+	            strcat(buf2, CF_ANSI_YELLOW);
 	         break;
              case 'b':		/* blue fg */
                  if ( mudconf.global_ansimask & MASK_BLUE )
-	            strcat(buf2, ANSI_BLUE);
+	            strcat(buf2, CF_ANSI_BLUE);
 	         break;
              case 'm':		/* magenta fg */
                  if ( mudconf.global_ansimask & MASK_MAGENTA )
-	            strcat(buf2, ANSI_MAGENTA);
+	            strcat(buf2, CF_ANSI_MAGENTA);
 	         break;
              case 'c':		/* cyan fg */
                  if ( mudconf.global_ansimask & MASK_CYAN )
-	            strcat(buf2, ANSI_CYAN);
+	            strcat(buf2, CF_ANSI_CYAN);
 	         break;
              case 'w':		/* white fg */
                  if ( mudconf.global_ansimask & MASK_WHITE )
-	            strcat(buf2, ANSI_WHITE);
+	            strcat(buf2, CF_ANSI_WHITE);
 	         break;
              case 'X':		/* black bg */
                  if ( mudconf.global_ansimask & MASK_BBLACK )
-	            strcat(buf2, ANSI_BBLACK);
+	            strcat(buf2, CF_ANSI_BBLACK);
 	         break;
              case 'R':		/* red bg */
                  if ( mudconf.global_ansimask & MASK_BRED )
-	            strcat(buf2, ANSI_BRED);
+	            strcat(buf2, CF_ANSI_BRED);
 	         break;
              case 'G':		/* green bg */
                  if ( mudconf.global_ansimask & MASK_BGREEN )
-	            strcat(buf2, ANSI_BGREEN);
+	            strcat(buf2, CF_ANSI_BGREEN);
 	         break;
              case 'Y':		/* yellow bg */
                  if ( mudconf.global_ansimask & MASK_BYELLOW )
-	            strcat(buf2, ANSI_BYELLOW);
+	            strcat(buf2, CF_ANSI_BYELLOW);
 	         break;
              case 'B':		/* blue bg */
                  if ( mudconf.global_ansimask & MASK_BBLUE )
-	            strcat(buf2, ANSI_BBLUE);
+	            strcat(buf2, CF_ANSI_BBLUE);
 	         break;
              case 'M':		/* magenta bg */
                  if ( mudconf.global_ansimask & MASK_BMAGENTA )
-	            strcat(buf2, ANSI_BMAGENTA);
+	            strcat(buf2, CF_ANSI_BMAGENTA);
 	         break;
              case 'C':		/* cyan bg */
                  if ( mudconf.global_ansimask & MASK_BCYAN )
-	            strcat(buf2, ANSI_BCYAN);
+	            strcat(buf2, CF_ANSI_BCYAN);
 	         break;
              case 'W':		/* white bg */
                  if ( mudconf.global_ansimask & MASK_BWHITE )
-	            strcat(buf2, ANSI_BWHITE);
+	            strcat(buf2, CF_ANSI_BWHITE);
 	         break;
           }
           s++;
@@ -3428,7 +3592,8 @@ convert_flags(dbref player, char *flaglist, FLAGSET * fset, FLAG * p_type, int w
 void 
 decompile_flags(dbref player, dbref thing, char *thingname, char *qualout, int i_tf)
 {
-    char *tpr_buff, *tprp_buff;
+    char *tpr_buff, *tprp_buff, *s_buff, *s_ptr;
+    int first = 0;
     FLAG f1, f2, f3, f4;
     FLAGENT *fp;
 
@@ -3439,6 +3604,7 @@ decompile_flags(dbref player, dbref thing, char *thingname, char *qualout, int i
     f3 = Flags3(thing);
     f4 = Flags4(thing);
 
+    s_ptr = s_buff = alloc_lbuf("decompile_flags");
     for (fp = (FLAGENT *) hash_firstentry2(&mudstate.flags_htab, 1); 
 	 fp;
 	 fp = (FLAGENT *) hash_nextentry(&mudstate.flags_htab)){
@@ -3484,12 +3650,71 @@ decompile_flags(dbref player, dbref thing, char *thingname, char *qualout, int i
 	    continue;
 
 	/* We made it this far, report this flag */
-
-        tprp_buff = tpr_buff = alloc_lbuf("decompile_flags");
-	noansi_notify(player, safe_tprintf(tpr_buff, &tprp_buff, "%s@set %s=%s", 
-                                           (i_tf ? qualout : (char *)""), thingname, fp->flagname));
-        free_lbuf(tpr_buff);
+        if ( first )
+           safe_chr(' ', s_buff, &s_ptr);
+        safe_str((char *)fp->flagname, s_buff, &s_ptr);
+        first = 1;
     }
+    if ( *s_buff ) {
+       tprp_buff = tpr_buff = alloc_lbuf("decompile_flags");
+       noansi_notify(player, safe_tprintf(tpr_buff, &tprp_buff, "%s@set %s=%s", 
+                                          (i_tf ? qualout : (char *)""), thingname, s_buff));
+       free_lbuf(tpr_buff);
+    }
+    free_lbuf(s_buff);
+}
+
+void 
+decompile_toggles(dbref player, dbref thing, char *thingname, char *qualout, int i_tf)
+{
+    char *tpr_buff, *tprp_buff, *s_buff, *s_ptr;
+    int first = 0;
+    FLAG f1, f2;
+    TOGENT *tp;
+
+    /* Report generic flags */
+
+    f1 = Toggles(thing);
+    f2 = Toggles2(thing);
+
+    s_ptr = s_buff = alloc_lbuf("decompile_flags");
+    for (tp = (TOGENT *) hash_firstentry(&mudstate.toggles_htab);
+         tp;
+         tp = (TOGENT *) hash_nextentry(&mudstate.toggles_htab)) {
+
+	/* Skip if we shouldn't decompile this flag */
+
+	if (tp->listperm & CA_NO_DECOMP)
+	    continue;
+
+	/* Skip if this flag is not set */
+
+	if (tp->toggleflag & TOGGLE2) {
+	    if (!(f2 & tp->togglevalue))
+		continue;
+	} else {
+	    if (!(f1 & tp->togglevalue))
+		continue;
+	}
+
+	/* Skip if we can't see this flag */
+
+	if (!check_access(player, tp->listperm, 0, 0))
+	    continue;
+
+	/* We made it this far, report this flag */
+        if ( first )
+           safe_chr(' ', s_buff, &s_ptr);
+        safe_str((char *)tp->togglename, s_buff, &s_ptr);
+        first = 1;
+    }
+    if ( *s_buff ) {
+       tprp_buff = tpr_buff = alloc_lbuf("decompile_flags");
+       noansi_notify(player, safe_tprintf(tpr_buff, &tprp_buff, "%s@toggle %s=%s", 
+                                         (i_tf ? qualout : (char *)""), thingname, s_buff));
+       free_lbuf(tpr_buff);
+    }
+    free_lbuf(s_buff);
 }
 #endif /* STANDALONE */
 
@@ -3745,7 +3970,7 @@ void do_toggledef(dbref player, dbref cause, int key, char *flag1, char *flag2)
 #ifndef STANDALONE
    TOGENT *tp;
    char listpermary[33], setovpermary[33], usetovpermary[33], typepermary[11], *lp_ptr, *sop_ptr, *usop_ptr, *t_ptr;;
-   char static_list[33], static_list2[19], type_list[11], *tmp_ptr, c_bef, c_aft, *tpr_buff, *tprp_buff;
+   char static_list[33], static_list2[33], type_list[11], *tmp_ptr, c_bef, c_aft, *tpr_buff, *tprp_buff, *tstrtokr;
    char *static_names[]={ "GOD", "IMMORTAL", "ROYALTY/WIZARD", "COUNCILOR", "ARCHITECT", "GUILDMASTER",
                           "MORTAL", "NO_SUSPECT", "NO_GUEST", "NO_WANDERER", "IGNORE", "IGNORE_IM", 
                           "IGNORE_ROYAL", "IGNORE_COUNC", "IGNORE_ARCH", "IGNORE_GM", "IGNORE_MORTAL", 
@@ -3897,7 +4122,7 @@ void do_toggledef(dbref player, dbref cause, int key, char *flag1, char *flag2)
       if ( key & FLAGDEF_TYPE ) {
          mask_add = mask_del = 0;
          nodecomp = 0;
-         tmp_ptr = strtok(flag2, " \t");
+         tmp_ptr = strtok_r(flag2, " \t", &tstrtokr);
          while (tmp_ptr != NULL) {
             if ( *tmp_ptr == '!' ) {
                nodecomp = 1;
@@ -3912,7 +4137,7 @@ void do_toggledef(dbref player, dbref cause, int key, char *flag1, char *flag2)
                else
                   mask_add |= srch_return;
             }
-            tmp_ptr = strtok(NULL, " \t");
+            tmp_ptr = strtok_r(NULL, " \t", &tstrtokr);
          }
          if ( !mask_add && !mask_del ) {
             notify_quiet(player, "Nothing for @flagdef to do.");
@@ -3928,7 +4153,7 @@ void do_toggledef(dbref player, dbref cause, int key, char *flag1, char *flag2)
          free_lbuf(tpr_buff);
          return;
       }
-      tmp_ptr = strtok(flag2, " \t");
+      tmp_ptr = strtok_r(flag2, " \t", &tstrtokr);
       nodecomp = 0;
       mask_add = mask_del = 0;
       while (tmp_ptr != NULL) {
@@ -3952,7 +4177,7 @@ void do_toggledef(dbref player, dbref cause, int key, char *flag1, char *flag2)
                   mask_add |= 0x40000000;
             } 
          }
-         tmp_ptr = strtok(NULL, " \t");
+         tmp_ptr = strtok_r(NULL, " \t", &tstrtokr);
       }
       if ( !(mask_add & ~stripmask) && !(mask_del & ~stripmask) ) {
          notify_quiet(player, "Nothing for @toggledef to do.");
@@ -4000,10 +4225,16 @@ int do_flag_and_toggle_def_conf(dbref player, char *str, char *cmd, int *vp, int
    return 0;
 #else
    int mask_add, mask_del, negate, srch_return, stripmask, i_mask1, i_mask2, i_mask3, i_mask4;
-   char *strtok, *strtok2, *strtokptr, *buff;
+   char *strtok, *strtok2, *strtokptr, *buff, *s;
    FLAGENT *fp;
    TOGENT *tp;
    
+   s = str;
+   while ( s && *s ) {
+      *s = ToLower(*s);
+      s++;
+   }
+
    stripmask=0xBFCB0090;
    strtok = strtok_r(str, " \t", &strtokptr);
    strtok2 = NULL;
@@ -4164,7 +4395,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
 #ifndef STANDALONE
    FLAGENT *fp;
    char listpermary[33], setovpermary[33], usetovpermary[33], typepermary[11], *lp_ptr, *sop_ptr, *usop_ptr, *t_ptr;
-   char static_list[33], static_list2[19], type_list[11], *tmp_ptr, c_bef, c_aft, *tpr_buff, *tprp_buff;
+   char static_list[33], static_list2[33], type_list[11], *tmp_ptr, c_bef, c_aft, *tpr_buff, *tprp_buff, *tstrtokr;
    char *static_names[]={ "GOD", "IMMORTAL", "ROYALTY/WIZARD", "COUNCILOR", "ARCHITECT", "GUILDMASTER",
                           "MORTAL", "NO_SUSPECT", "NO_GUEST", "NO_WANDERER", "IGNORE", "IGNORE_IM", 
                           "IGNORE_ROYAL", "IGNORE_COUNC", "IGNORE_ARCH", "IGNORE_GM", "IGNORE_MORTAL", 
@@ -4292,7 +4523,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
          if (minmatch(flag1, fp->flagname, strlen(fp->flagname))) 
             break;
       }
-      if ( !fp || !(fp->flagname)) {
+      if ( !fp || !((char *)(fp->flagname))) {
          notify_quiet(player, "Bad flag given to @flagdef");
          return;
       }
@@ -4317,7 +4548,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
       if ( key & FLAGDEF_TYPE ) {
          mask_add = mask_del = 0;
          nodecomp = 0;
-         tmp_ptr = strtok(flag2, " \t");
+         tmp_ptr = strtok_r(flag2, " \t", &tstrtokr);
          while (tmp_ptr != NULL) {
             if ( *tmp_ptr == '!' ) {
                nodecomp = 1;
@@ -4332,7 +4563,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
                else
                   mask_add |= srch_return;
             }
-            tmp_ptr = strtok(NULL, " \t");
+            tmp_ptr = strtok_r(NULL, " \t", &tstrtokr);
          }
          if ( !mask_add && !mask_del ) {
             notify_quiet(player, "Nothing for @flagdef to do.");
@@ -4348,7 +4579,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
          free_lbuf(tpr_buff);
          return;
       }
-      tmp_ptr = strtok(flag2, " \t");
+      tmp_ptr = strtok_r(flag2, " \t", &tstrtokr);
       nodecomp = 0;
       mask_add = mask_del = 0;
       while (tmp_ptr != NULL) {
@@ -4372,7 +4603,7 @@ void do_flagdef(dbref player, dbref cause, int key, char *flag1, char *flag2)
                   mask_add |= 0x40000000;
             } 
          }
-         tmp_ptr = strtok(NULL, " \t");
+         tmp_ptr = strtok_r(NULL, " \t", &tstrtokr);
       }
       if ( !(mask_add & ~stripmask) && !(mask_del & ~stripmask) ) {
          notify_quiet(player, "Nothing for @flagdef to do.");

@@ -7,6 +7,7 @@
 
 #include "htab.h"
 #include "attrs.h"
+#include "utils.h"
 
 #define FLAG2	        0x1     /* Lives in extended flag word */
 #define FLAG3		0x2
@@ -38,6 +39,7 @@
 #define MF_BFAIL        0x0400
 #define MF_COMPFAIL     0x0800
 #define MF_CPUEXT       0x1000
+#define MF_API		0x2000
 
 /* Object types */
 #define TYPE_ROOM       0x0
@@ -93,8 +95,8 @@
 #define GUILDOBJ        0x00000200      
 #define GUILDMASTER     0x00000400      /* Player has gm privs */
 #define NO_WALLS        0x00000800      /* So to stop normal walls */
-#define OLD_TEMPLE	0x00001000
-#define OLD_NOROBOT	0x00002000
+#define REQUIRE_TREES 	0x00001000	/* Trees are required on this target for attrib sets */
+/* ----FREE----         0x00002000 */   /* #define OLD_NOROBOT	0x00002000 */
 #define SCLOAK		0x00004000
 #define CLOAK		0x00008000
 #define FUBAR		0x00010000
@@ -244,7 +246,7 @@
 #define TOG_ACCENTS		0x00400000	/* Accents being displayed */
 #define TOG_PREMAILVALIDATE	0x00800000	/* Pre-Validate the mail send list before sending mail */
 #define TOG_SAFELOG             0x01000000	/* Allow 'clean logging' by the player */
-/* 0x02000000 free */
+#define TOG_UTF8                0x02000000	/* UTF8 being displayed */
 /* 0x04000000 free */
 #define TOG_NODEFAULT		0x08000000	/* Allow target to inherit default attribs */
 #define TOG_EXFULLWIZATTR	0x10000000	/* Examine Wiz attribs */
@@ -294,10 +296,11 @@
 #define POWER_PCREATE		6
 #define POWER_STAT_ANY		8
 #define POWER_FREE_WALL		10
-/* 12 free */
+#define POWER_EXECSCRIPT	12
 #define POWER_FREE_PAGE		14
 #define POWER_HALT_QUEUE	16
 #define POWER_HALT_QUEUE_ALL	18
+#define POWER_FORMATTING	20
 #define POWER_NOKILL		22
 #define POWER_SEARCH_ANY	24
 #define POWER_SECURITY		26
@@ -310,10 +313,10 @@
 #define POWER_NOWHO             4
 #define POWER_FULLTEL_ANYWHERE  6
 #define POWER_EX_FULL           8
-/* 10 free */
-/* 12 free */
-/* 14 free */
-/* 16 free */
+#define POWER_API		10
+#define POWER_MONITORAPI	12
+#define POWER_WIZ_IDLE		14
+#define POWER_WIZ_SPOOF		16
 /* 18 free */
 /* 20 free */
 /* 22 free */
@@ -363,6 +366,7 @@
 #define DP_PASSWORD		0
 #define DP_MORTAL_EXAMINE	2
 #define DP_PERSONAL_COMMANDS	4
+/* 6  free */
 #define DP_DARK			8
 /* 10 free */
 /* 12 free */
@@ -532,6 +536,7 @@ extern char *   FDECL(unparse_object_numonly, (dbref));
 extern char *   FDECL(ansi_exitname, (dbref));
 extern int      FDECL(convert_flags, (dbref, char *, FLAGSET *, FLAG *, int));
 extern void     FDECL(decompile_flags, (dbref, dbref, char *, char *, int));
+extern void     FDECL(decompile_toggles, (dbref, dbref, char *, char *, int));
 extern int	FDECL(HasPriv, (dbref, dbref, int, int, int));
 
 extern int	FDECL(parse_aflags, (dbref, dbref, int, char *, char **, int));
@@ -664,6 +669,7 @@ extern int	FDECL(has_aflag, (dbref, dbref, int, char *));
 #define TogHideIdle(x)	((Toggles2(x) & TOG_HIDEIDLE) != 0)
 #define TogMortReal(x)	((Toggles2(x) & TOG_MORTALREALITY) != 0)
 #define Accents(x)	((Toggles2(x) & TOG_ACCENTS) != 0)
+#define UTF8(x)		((Toggles2(x) & TOG_UTF8) != 0)
 #define MailValid(x)	((Toggles2(x) & TOG_PREMAILVALIDATE) != 0)
 #define KeepAlive(x)	((Toggles2(x) & TOG_KEEPALIVE) != 0)
 #define ChkReality(x)	((Toggles2(x) & TOG_CHKREALITY) != 0)
@@ -715,6 +721,7 @@ extern int	FDECL(has_aflag, (dbref, dbref, int, char *));
 #define Wizard(x)	((Flags(x) & WIZARD) || Immortal(x) || God(x) ||\
 			 ((Flags(Owner(x)) & WIZARD) && Inherits(x)))
 #endif
+#define ReqTrees(x)	((Flags2(x) & REQUIRE_TREES) != 0)
 #define Recover(x)	((Flags2(x) & RECOVER) != 0)
 #define Byeroom(x)	((Flags2(x) & BYEROOM) != 0)
 #define Dr_Purge(x)	((Flags3(x) & DR_PURGE) != 0)
@@ -897,13 +904,12 @@ extern int	FDECL(has_aflag, (dbref, dbref, int, char *));
 			   !(Flags(Owner(x)) & WIZARD) && \
 			   !(Flags2(Owner(x)) & ADMIN) && \
 			   !(Flags2(Owner(x)) & BUILDER) && \
-			   !((((a)->flags & (AF_GOD|AF_IMMORTAL|AF_WIZARD|AF_ADMIN|AF_BUILDER)) && \
-			   ((a)->flags & AF_GUILDMASTER)) || \
-                             ((f & (AF_GOD|AF_IMMORTAL|AF_WIZARD|AF_ADMIN|AF_BUILDER)) && \
-                              (f & (AF_GUILDMASTER)))))
+			   !(((a)->flags & (AF_GOD|AF_IMMORTAL|AF_WIZARD|AF_ADMIN|AF_BUILDER)) || \
+                             (f & (AF_GOD|AF_IMMORTAL|AF_WIZARD|AF_ADMIN|AF_BUILDER))))
 #ifndef STANDALONE
 #define ControlsforattrOwner(p,x,a,f) \
 			  ((((Owner(p) == Owner(x)) && \
+                             (evlevchk(p,bittype(p)) ? mudstate.evalresult : 1) && \
 			     (Inherits(p) || !Inherits(x))) || \
                              could_doit(p,x,A_LTWINK,0,0)) && \
 			   ((Immortal(p) && !(((a)->flags & (AF_GOD)) || \

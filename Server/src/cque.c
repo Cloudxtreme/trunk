@@ -103,9 +103,22 @@ void execute_entry(BQUE *queue)
 
 		command = queue->comm;
 		mudstate.breakst = 0;
-                mudstate.breakdolist = 0;
-                mudstate.includecnt = 0;
-                mudstate.force_halt =0;
+		mudstate.jumpst = 0;
+		memset(mudstate.gotolabel,'\0',16);
+    mudstate.gotostate = 0;
+		mudstate.rollbackcnt = 0;
+    mudstate.breakdolist = 0;
+    mudstate.includecnt = 0;
+    mudstate.includenest = 0;
+    mudstate.force_halt =0;
+    if ( !mudstate.rollbackstate ) {
+		   mudstate.rollbackcnt = 0;
+       if ( command ) {
+		      strncpy(mudstate.rollback, command, LBUF_SIZE);
+       } else {
+		      memset(mudstate.rollback, '\0', LBUF_SIZE);
+       }
+    }
 		while (command && !mudstate.breakst) {
 		    cp = parse_to(&command, ';', 0);
 		    if (cp && *cp) {
@@ -114,7 +127,7 @@ void execute_entry(BQUE *queue)
 					queue->cause,
 					0, cp,
 					queue->env,
-					queue->nargs, queue->shellprg);
+					queue->nargs, queue->shellprg, queue->hooked_command);
 		    }
 		}
                 mudstate.shell_program = 0;
@@ -437,6 +450,7 @@ freeze_pid(dbref player, int pid, int key)
             freezepid->shellprg = point->shellprg;
             freezepid->stop_bool = point->stop_bool;
             freezepid->stop_bool_val = point->stop_bool_val;
+            freezepid->hooked_command = point->hooked_command;
             if ( Good_obj(point->player) )
                freezepid->plr_type = Typeof(point->player);
             else
@@ -513,6 +527,7 @@ freeze_pid(dbref player, int pid, int key)
             freezepid->shellprg = freezepid->shellprg;
             freezepid->stop_bool = point->stop_bool;
             freezepid->stop_bool_val = point->stop_bool_val;
+            freezepid->hooked_command = point->hooked_command;
             if ( Good_obj(point->player) )
                freezepid->plr_type = Typeof(point->player);
             else
@@ -639,6 +654,7 @@ thaw_pid(dbref player, int pid, int key)
                freezepid->shellprg = point->shellprg;
                freezepid->stop_bool = point->stop_bool;
                freezepid->stop_bool_val = point->stop_bool_val;
+               freezepid->hooked_command = point->hooked_command;
             }
 	    numhalted++;
 	    if (trail)
@@ -719,6 +735,7 @@ thaw_pid(dbref player, int pid, int key)
                freezepid->shellprg = point->shellprg;
                freezepid->stop_bool = point->stop_bool;
                freezepid->stop_bool_val = point->stop_bool_val;
+               freezepid->hooked_command = point->hooked_command;
             }
 	    numhalted++;
 	    if (trail)
@@ -1316,11 +1333,15 @@ void
 do_halt(dbref player, dbref cause, int key, char *target)
 {
     dbref player_targ, obj_targ;
-    int numhalted, pid, i_keytype;
+    int numhalted, pid, i_keytype, i_quiet;
 
     /* Figure out what to halt */
 
-    i_keytype = 0;
+    i_keytype = i_quiet = 0;
+    if ( key & HALT_QUIET ) {
+       key = key & ~HALT_QUIET;
+       i_quiet = 1;
+    }
     pid = -1;
     if ( key & HALT_PIDSTOP ) {
        i_keytype = 1;
@@ -1370,10 +1391,12 @@ do_halt(dbref player, dbref cause, int key, char *target)
       else if (!numhalted)
 	notify(player,"PID not found/Permisison denied.");
       if ( numhalted && (i_keytype > 0) ) {
-         if ( i_keytype == 1 )
-	    notify(Owner(player), unsafe_tprintf("Queue entry %d stopped.", numhalted));
-         else
-	    notify(Owner(player), unsafe_tprintf("Queue entry %d resumed.", numhalted));
+         if ( !(Quiet(player) || i_quiet) ) {
+            if ( i_keytype == 1 )
+	       notify(Owner(player), unsafe_tprintf("Queue entry %d stopped.", numhalted));
+            else
+	       notify(Owner(player), unsafe_tprintf("Queue entry %d resumed.", numhalted));
+         }
          return;
       }
     } else {
@@ -1397,7 +1420,7 @@ do_halt(dbref player, dbref cause, int key, char *target)
 	numhalted = halt_que(player_targ, obj_targ);
     }
 
-    if (Quiet(player))
+    if (Quiet(player) || i_quiet)
 	return;
     if (numhalted == 1) {
         if ( pid != -1 ) {
@@ -1709,6 +1732,7 @@ setup_que(dbref player, dbref cause, char *command,
     tmp->nargs = nargs;
     tmp->stop_bool = 0;
     tmp->stop_bool_val = 0;
+    tmp->hooked_command = mudstate.no_hook;
     if ( InProgram(player) )
        tmp->shellprg = 1;
     else

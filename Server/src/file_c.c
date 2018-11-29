@@ -104,9 +104,9 @@ fcache_read(FBLOCK ** cp, char *filename)
 {
     int n, nmax, nmax2, tchars, fd;
     char *buff, *buff2;
-    char *lbuf1, *lbuf2;
+    char *lbuf1, *lbuf2, *lbuf3;
 #ifdef ZENTY_ANSI
-    char *lbuf1ptr, *lbuf2ptr;
+    char *lbuf1ptr, *lbuf2ptr, *lbuf3ptr;
 #endif
     FBLOCK *fp, *tfp;
     int max_lines, tot_lines;
@@ -153,15 +153,18 @@ fcache_read(FBLOCK ** cp, char *filename)
     tot_lines = 0;
     lbuf1 = alloc_lbuf("Testing");
     lbuf2 = alloc_lbuf("Testing2");
+    lbuf3 = alloc_lbuf("Testing3");
     if ( mudconf.ansi_txtfiles ) {
        memset(lbuf1, '\0', LBUF_SIZE);
        memset(lbuf2, '\0', LBUF_SIZE);
+       memset(lbuf3, '\0', LBUF_SIZE);
        nmax2 = read(fd, buff, LBUF_SIZE - 1);
        if ( nmax2 > 0 ) {
 #ifdef ZENTY_ANSI
           lbuf1ptr = lbuf1;
           lbuf2ptr = lbuf2;
-          parse_ansi(buff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr);
+          lbuf3ptr = lbuf3;
+          parse_ansi(buff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr, lbuf3, &lbuf3ptr);
 #else
           strncpy(lbuf1, buff, LBUF_SIZE - 1);
 #endif
@@ -189,11 +192,13 @@ fcache_read(FBLOCK ** cp, char *filename)
 	   nmax2 = read(fd, buff, LBUF_SIZE - 1);
            memset(lbuf1, '\0', LBUF_SIZE);
            memset(lbuf2, '\0', LBUF_SIZE);
+           memset(lbuf3, '\0', LBUF_SIZE);
            if ( nmax2 > 0 ) {
 #ifdef ZENTY_ANSI
               lbuf1ptr = lbuf1;
               lbuf2ptr = lbuf2;
-              parse_ansi(buff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr);
+              lbuf3ptr = lbuf3;
+              parse_ansi(buff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr, lbuf3, &lbuf3ptr);
 #else
               strncpy(lbuf1, buff, LBUF_SIZE - 1);
 #endif
@@ -216,6 +221,7 @@ fcache_read(FBLOCK ** cp, char *filename)
     free_lbuf(buff);
     free_lbuf(lbuf1);
     free_lbuf(lbuf2);
+    free_lbuf(lbuf3);
     tf_close(fd);
 
     /* If we didn't read anything in, toss the initial buffer */
@@ -228,18 +234,19 @@ fcache_read(FBLOCK ** cp, char *filename)
 }
 
 void 
-fcache_rawdump(int fd, int num, struct in_addr host)
+fcache_rawdump(int fd, int num, struct in_addr host, char *s_site)
 {
     int cnt, remaining;
     char *start;
     FBLOCK *fp;
-    char *atext, *retbuff, *sarray[4], *lbuf1, *lbuf2;
+    char *atext, *retbuff, *sarray[5], *lbuf1, *lbuf2, *lbuf3;
 #ifdef ZENTY_ANSI
-    char *lbuf1ptr, *lbuf2ptr;
+    char *lbuf1ptr, *lbuf2ptr, *lbuf3ptr;
 #endif
-    int aflags, nomatch;
+    int aflags, nomatch, chk_tog;
+    time_t chk_stop;
     dbref aowner;
-    ATTR *atr;
+    ATTR *atr = NULL;
     char *site_info[]={"connect", "badsite", "down", "full", "guest", "register", "newuser", 
                        "regfail", "motd", "wizmotd", "quit", "guestfail", "autoreg", "autoreghost",
                        NULL};
@@ -250,7 +257,12 @@ fcache_rawdump(int fd, int num, struct in_addr host)
 
     if ( Good_chk(mudconf.file_object) && Immortal(Owner(mudconf.file_object)) ) {
        nomatch = 0;
-       atr = atr_str(site_info[num]);
+       if ( s_site ) {
+          atr = atr_str3(s_site);
+       }
+       if ( !atr ) {
+          atr = atr_str3(site_info[num]);
+       }
        if ( !atr ) {
           nomatch = 1;
        } else {
@@ -261,22 +273,39 @@ fcache_rawdump(int fd, int num, struct in_addr host)
              sarray[0] = alloc_lbuf("fcache_dump1");
              sarray[1] = alloc_lbuf("fcache_dump2");
              sarray[2] = alloc_lbuf("fcache_dump2");
-             sarray[3] = NULL;
+             sarray[3] = alloc_lbuf("fcache_dump2");
+             sarray[4] = NULL;
              strcpy(sarray[0], inet_ntoa(host));
              strcpy(sarray[1], sarray[0]);
              sprintf(sarray[2], "%d", fd);
+             sprintf(sarray[3], "#%d", NOTHING);
+             chk_stop = mudstate.chkcpu_stopper;
+             chk_tog = mudstate.chkcpu_toggle;
              mudstate.chkcpu_stopper = time(NULL);
-             retbuff = exec(mudconf.file_object, mudconf.file_object, mudconf.file_object,
-                            EV_STRIP | EV_FCHECK | EV_EVAL, atext, sarray, 3);
+             retbuff = cpuexec(mudconf.file_object, mudconf.file_object, mudconf.file_object,
+                               EV_STRIP | EV_FCHECK | EV_EVAL, atext, sarray, 4, (char **)NULL, 0);
+             if ( !chk_tog && mudstate.chkcpu_toggle ) {
+                broadcast_monitor(mudconf.file_object, MF_CPU, "CPU RUNAWAY TXTFILE PROCESS",
+                                  (char *)atr->name, NULL, mudconf.file_object, 0, 0, NULL);
+                STARTLOG(LOG_ALWAYS, "WIZ", "CPU");
+                   log_name_and_loc(mudconf.file_object);
+                   sprintf(atext, " CPU txtfile overload on attribute %s", (char *)atr->name);
+                   log_text(atext);
+                ENDLOG
+             }
+             mudstate.chkcpu_stopper = chk_stop;
+             mudstate.chkcpu_toggle = chk_tog;
              if ( !*retbuff ) {
                 nomatch = 1;
              } else {
                 lbuf1 = alloc_lbuf("fcache_dump3");
                 lbuf2 = alloc_lbuf("fcache_dump4");
+                lbuf3 = alloc_lbuf("fcache_dump5");
 #ifdef ZENTY_ANSI
                 lbuf1ptr = lbuf1;
                 lbuf2ptr = lbuf2;
-                parse_ansi(retbuff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr);
+                lbuf3ptr = lbuf3;
+                parse_ansi(retbuff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr, lbuf3, &lbuf3ptr);
 #else
                 strcpy(lbuf1, retbuff);
 #endif
@@ -284,22 +313,69 @@ fcache_rawdump(int fd, int num, struct in_addr host)
                 remaining = strlen(lbuf1);
 	        while (remaining > 0) {
 	           cnt = WRITE(fd, start, remaining);
-	           if (cnt < 0)
-		       return;
+	           if (cnt < 0) {
+		       break;
+                   }
 	           remaining -= cnt;
 	           start += cnt;
 	        }
                 free_lbuf(lbuf1);
                 free_lbuf(lbuf2);
+                free_lbuf(lbuf3);
              }
              free_lbuf(retbuff);
              free_lbuf(sarray[0]);
              free_lbuf(sarray[1]);
              free_lbuf(sarray[2]);
+             free_lbuf(sarray[3]);
           }
           free_lbuf(atext);
        }
        if ( nomatch ) {
+          if ( s_site && *s_site && (strcmp(s_site, (char *)"SITE_FORBIDAPI") == 0) ) {
+             lbuf1 = alloc_lbuf("SITE_FORBIDAPI");
+             sprintf(lbuf1, "HTTP/1.1 400 Bad Request\r\nContent-type: text/plain\r\nDate: %sExec: Error - IP is forbidden\r\n", (char *)ctime(&mudstate.now));
+             start = lbuf1;
+             remaining = strlen(lbuf1);
+	     while (remaining > 0) {
+	        cnt = WRITE(fd, start, remaining);
+	        if (cnt < 0)
+		   break;
+	        remaining -= cnt;
+	        start += cnt;
+	     }
+             free_lbuf(lbuf1);
+          } else {
+             fp = fcache[num].fileblock;
+             while (fp != NULL) {
+	         start = fp->data;
+	         remaining = fp->hdr.nchars;
+	         while (remaining > 0) {
+	             cnt = WRITE(fd, start, remaining);
+	             if (cnt < 0)
+		         return;
+	             remaining -= cnt;
+	             start += cnt;
+	         }
+	         fp = fp->hdr.nxt;
+             }
+          }
+       }
+    } else {
+       if ( s_site && *s_site && (strcmp(s_site, (char *)"SITE_FORBIDAPI") == 0) ) {
+          lbuf1 = alloc_lbuf("SITE_FORBIDAPI");
+          sprintf(lbuf1, "HTTP/1.1 400 Bad Request\r\nContent-type: text/plain\r\nDate: %sExec: Error - IP is forbidden\r\n", (char *)ctime(&mudstate.now));
+          start = lbuf1;
+          remaining = strlen(lbuf1);
+          while (remaining > 0) {
+             cnt = WRITE(fd, start, remaining);
+             if (cnt < 0)
+             break;
+             remaining -= cnt;
+             start += cnt;
+          }
+          free_lbuf(lbuf1);
+       } else {
           fp = fcache[num].fileblock;
           while (fp != NULL) {
 	      start = fp->data;
@@ -314,35 +390,22 @@ fcache_rawdump(int fd, int num, struct in_addr host)
 	      fp = fp->hdr.nxt;
           }
        }
-    } else {
-       fp = fcache[num].fileblock;
-       while (fp != NULL) {
-	   start = fp->data;
-	   remaining = fp->hdr.nchars;
-	   while (remaining > 0) {
-	       cnt = WRITE(fd, start, remaining);
-	       if (cnt < 0)
-		   return;
-	       remaining -= cnt;
-	       start += cnt;
-	   }
-	   fp = fp->hdr.nxt;
-       }
     }
     return;
 }
 
 void 
-fcache_dump(DESC * d, int num)
+fcache_dump(DESC * d, int num, char *s_site)
 {
     FBLOCK *fp;
-    char *atext, *retbuff, *sarray[4], *lbuf1, *lbuf2; 
+    char *atext, *retbuff, *sarray[5], *lbuf1, *lbuf2, *lbuf3; 
 #ifdef ZENTY_ANSI
-    char *lbuf1ptr, *lbuf2ptr;
+    char *lbuf1ptr, *lbuf2ptr, *lbuf3ptr;
 #endif
-    int aflags, nomatch, i_length;
+    int aflags, nomatch, i_length, chk_tog;
+    time_t chk_stop;
     dbref aowner;
-    ATTR *atr;
+    ATTR *atr = NULL;
     char *site_info[]={"connect", "badsite", "down", "full", "guest", "register", "newuser", 
                        "regfail", "motd", "wizmotd", "quit", "guestfail", "autoreg", "autoreghost",
                        NULL};
@@ -352,7 +415,12 @@ fcache_dump(DESC * d, int num)
 
     if ( Good_chk(mudconf.file_object) && Immortal(Owner(mudconf.file_object)) ) {
        nomatch = 0;
-       atr = atr_str(site_info[num]);
+       if ( s_site ) {
+          atr = atr_str3(s_site);
+       }
+       if ( !atr ) {
+          atr = atr_str3(site_info[num]);
+       }
        if ( !atr ) {
           nomatch = 1;
        } else {
@@ -363,22 +431,42 @@ fcache_dump(DESC * d, int num)
              sarray[0] = alloc_lbuf("fcache_dump1");
              sarray[1] = alloc_lbuf("fcache_dump2");
              sarray[2] = alloc_lbuf("fcache_dump2");
-             sarray[3] = NULL;
+             sarray[3] = alloc_lbuf("fcache_dump2");
+             sarray[4] = NULL;
              strcpy(sarray[0], inet_ntoa(d->address.sin_addr));
              strcpy(sarray[1], d->addr);
              sprintf(sarray[2], "%d", d->descriptor);
+             if ( d->player <= 0 )
+                sprintf(sarray[3], "#%d", NOTHING);
+             else
+                sprintf(sarray[3], "#%d", d->player);
+             chk_stop = mudstate.chkcpu_stopper;
+             chk_tog = mudstate.chkcpu_toggle;
              mudstate.chkcpu_stopper = time(NULL);
-             retbuff = exec(mudconf.file_object, mudconf.file_object, mudconf.file_object,
-                            EV_STRIP | EV_FCHECK | EV_EVAL, atext, sarray, 3);
+             retbuff = cpuexec(mudconf.file_object, mudconf.file_object, mudconf.file_object,
+                            EV_STRIP | EV_FCHECK | EV_EVAL, atext, sarray, 4, (char **)NULL, 0);
+             if ( !chk_tog && mudstate.chkcpu_toggle ) {
+                broadcast_monitor(mudconf.file_object, MF_CPU, "CPU RUNAWAY TXTFILE PROCESS",
+                                  (char *)atr->name, NULL, mudconf.file_object, 0, 0, NULL);
+                STARTLOG(LOG_ALWAYS, "WIZ", "CPU");
+                   log_name_and_loc(mudconf.file_object);
+                   sprintf(atext, " CPU txtfile overload on attribute %s", (char *)atr->name);
+                   log_text(atext);
+                ENDLOG
+             }
+             mudstate.chkcpu_stopper = chk_stop;
+             mudstate.chkcpu_toggle = chk_tog;
              if ( !*retbuff ) {
                 nomatch = 1;
              } else {
                 lbuf1 = alloc_lbuf("fcache_dump3");
                 lbuf2 = alloc_lbuf("fcache_dump4");
+                lbuf3 = alloc_lbuf("fcache_dump5");
 #ifdef ZENTY_ANSI
                 lbuf1ptr = lbuf1;
                 lbuf2ptr = lbuf2;
-                parse_ansi(retbuff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr);
+                lbuf3ptr = lbuf3;
+                parse_ansi(retbuff, lbuf1, &lbuf1ptr, lbuf2, &lbuf2ptr, lbuf3, &lbuf3ptr);
 #else
                 strcpy(lbuf1, retbuff);
 #endif
@@ -387,27 +475,47 @@ fcache_dump(DESC * d, int num)
                 queue_write(d, "\r\n", 2);
                 free_lbuf(lbuf1);
                 free_lbuf(lbuf2);
+                free_lbuf(lbuf3);
              }
              free_lbuf(retbuff);
              free_lbuf(sarray[0]);
              free_lbuf(sarray[1]);
              free_lbuf(sarray[2]);
+             free_lbuf(sarray[3]);
           }
           free_lbuf(atext);
        }
        if ( nomatch ) {
+          if ( s_site && *s_site && (strcmp(s_site, (char *)"SITE_FORBIDAPI") == 0) ) {
+             lbuf1 = alloc_lbuf("SITE_FORBIDAPI");
+             sprintf(lbuf1, "HTTP/1.1 400 Bad Request\r\nContent-type: text/plain\r\nDate: %sExec: Error - IP is forbidden\r\n", (char *)ctime(&mudstate.now));
+             i_length = strlen(lbuf1);
+             queue_write(d, lbuf1, i_length);
+             queue_write(d, "\r\n", 2);
+             free_lbuf(lbuf1);
+          } else {
+             fp = fcache[num].fileblock;
+             while (fp != NULL) {
+  	         queue_write(d, fp->data, fp->hdr.nchars);
+	         fp = fp->hdr.nxt;
+             }
+          }
+       }
+    } else {
+       if ( s_site && *s_site && (strcmp(s_site, (char *)"SITE_FORBIDAPI") == 0) ) {
+          lbuf1 = alloc_lbuf("SITE_FORBIDAPI");
+          sprintf(lbuf1, "HTTP/1.1 400 Bad Request\r\nContent-type: text/plain\r\nDate: %sExec: Error - IP is forbidden\r\n", (char *)ctime(&mudstate.now));
+          i_length = strlen(lbuf1);
+          queue_write(d, lbuf1, i_length);
+          queue_write(d, "\r\n", 2);
+          free_lbuf(lbuf1);
+       } else {
           fp = fcache[num].fileblock;
+
           while (fp != NULL) {
   	      queue_write(d, fp->data, fp->hdr.nchars);
 	      fp = fp->hdr.nxt;
           }
-       }
-    } else {
-       fp = fcache[num].fileblock;
-
-       while (fp != NULL) {
-  	   queue_write(d, fp->data, fp->hdr.nchars);
-	   fp = fp->hdr.nxt;
        }
     }
 }
@@ -418,7 +526,7 @@ fcache_send(dbref player, int num)
     DESC *d;
 
     DESC_ITER_PLAYER(player, d) {
-	fcache_dump(d, num);
+	fcache_dump(d, num, (char *)NULL);
     }
 }
 

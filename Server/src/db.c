@@ -35,6 +35,10 @@ int malloc_count = 0;
 
 #endif /* TEST_MALLOC */
 
+extern double mush_mktime64(struct tm *);
+extern double safe_atof(char *);
+extern int FDECL(do_convtime, (char *, struct tm *));
+
 /* -------
  * Zone list management
  */
@@ -289,6 +293,7 @@ extern int FDECL(fwdlist_ck, (int, dbref, dbref, int, char *));
 
 /* Other declarations */
 extern int FDECL(ansiname_ck, (int, dbref, dbref, int, char *));
+extern int FDECL(progprompt_ck, (int, dbref, dbref, int, char *));
 
 extern void FDECL(pcache_reload, (dbref));
 extern void FDECL(desc_reload, (dbref));
@@ -490,7 +495,7 @@ ATTR attr[] =
     {"PayLim", A_PAYLIM, AF_MDARK | AF_NOPROG | AF_IMMORTAL, NULL},
     {"Prefix", A_PREFIX, AF_ODARK | AF_NOPROG, NULL},
     {"ProgBuffer", A_PROGBUFFER, AF_DARK | AF_NOPROG | AF_INTERNAL | AF_NOCMD, NULL},
-    {"ProgPrompt", A_PROGPROMPT, AF_ODARK | AF_NOPROG | AF_NOANSI | AF_NORETURN, NULL},
+    {"ProgPrompt", A_PROGPROMPT, AF_ODARK | AF_NOPROG | AF_NOANSI | AF_NORETURN, progprompt_ck},
     {"ProgPromptBuffer", A_PROGPROMPTBUF, AF_DARK | AF_NOPROG | AF_INTERNAL | AF_NOCMD, NULL},
     {"ProtectName", A_PROTECTNAME, AF_DARK | AF_MDARK | AF_INTERNAL | AF_GOD | AF_NOCMD, NULL},
     {"QueueMax", A_QUEUEMAX, AF_MDARK | AF_WIZARD | AF_NOPROG, NULL},
@@ -835,7 +840,26 @@ fwdlist_rewrite(FWDLIST * fp, char *atext)
 }
 
 /* ---------------------------------------------------------------------------
- * fwdlist_ck:  Check a list of dbref numbers to forward to for AUDIBLE
+ * progprompt_ck :  don't exceed 80 characters
+ */
+
+int
+progprompt_ck(int key, dbref player, dbref thing, int anum, char *atext)
+{
+#ifndef STANDALONE
+   if ( strlen(strip_all_ansi(atext)) > 80 ) {
+      notify(player, "ProgPrompt can not exceed 80 characters.");
+      return 0;
+   } else {
+      return 1;
+   }
+#else
+   return 1;
+#endif
+}
+
+/* ---------------------------------------------------------------------------
+ * ansiname_ck:  don't allow if player set noansiname
  */
 
 int 
@@ -850,6 +874,10 @@ ansiname_ck(int key, dbref player, dbref thing, int anum, char *atext)
    else
       return 1;
 }
+
+/* ---------------------------------------------------------------------------
+ * fwdlist_ck:  Check a list of dbref numbers to forward to for AUDIBLE
+ */
 
 int 
 fwdlist_ck(int key, dbref player, dbref thing, int anum, char *atext)
@@ -1006,7 +1034,7 @@ void
 do_attribute(dbref player, dbref cause, int key, char *aname, char *value)
 {
     int success, negate, f, delcnt, aflags;
-    char *buff, *sp, *p, *q, *lbuff, *s_chkattr;
+    char *buff, *sp, *p, *q, *lbuff, *s_chkattr, *tstrtokr;
     dbref i, aowner;
     VATTR *va;
     ATTR *va2;
@@ -1037,7 +1065,7 @@ do_attribute(dbref player, dbref cause, int key, char *aname, char *value)
 
 	for (sp = value; *sp; sp++)
 	    *sp = ToLower((int)*sp);
-	sp = strtok(value, " ");
+	sp = strtok_r(value, " ", &tstrtokr);
 	success = 0;
 	while (sp != NULL) {
 
@@ -1064,7 +1092,7 @@ do_attribute(dbref player, dbref cause, int key, char *aname, char *value)
 
 	    /* Get the next token */
 
-	    sp = strtok(NULL, " ");
+	    sp = strtok_r(NULL, " ", &tstrtokr);
 	}
 	if (success && !Quiet(player))
 	    notify(player, "Attribute access changed.");
@@ -1088,6 +1116,11 @@ do_attribute(dbref player, dbref cause, int key, char *aname, char *value)
 	break;
 
     case ATTRIB_DELETE:
+        if ( va->command_flag > 0 ) {
+           notify(player, unsafe_tprintf("Attribute %s is command-accessed %d times.  Can not delete.", va->name, va->command_flag));
+           break;
+        }
+
         /* Let's verify the attribute is not in use first */
         s_chkattr = alloc_lbuf("attribute_delete");
         DO_WHOLE_DB(i) {
@@ -1117,8 +1150,13 @@ do_attribute(dbref player, dbref cause, int key, char *aname, char *value)
 
     if (key != ATTRIB_DELETE) {
 	lbuff = alloc_lbuf("attrib_access");
-	sprintf(lbuff, "Access for %s:",
-		va->name);
+        if ( va->command_flag > 0 ) {
+	   sprintf(lbuff, "Access for %s [%d commands linked]:",
+		   va->name, va->command_flag);
+        } else {
+	   sprintf(lbuff, "Access for %s:",
+		   va->name);
+        }
 	listset_nametab(player, attraccess_nametab, 0,
 			va->flags, 0, lbuff, 1);
 	free_lbuf(lbuff);
@@ -1138,6 +1176,10 @@ do_fixdb(dbref player, dbref cause, int key, char *arg1, char *arg2)
     char *s_types[]={ "room", "thing", "exit", "player", "zone", "garbage", "unknown type 1", "unknown type 2", NULL };
     int aflags, i_type;
 
+    if ( mudstate.remotep != NOTHING ) {
+       notify(player, "You can't fix the db remotely.");
+       return;
+    }
     init_match(player, arg1, NOTYPE);
     match_everything(0);
     thing = noisy_match_result();
@@ -1288,6 +1330,182 @@ NDECL(init_attrtab)
 /* ---------------------------------------------------------------------------
  * atr_str: Look up an attribute by name.
  */
+
+ATTR *
+atr_str_objid(char *s)
+{
+    char *buff, *p, *q;
+    ATTR *a;
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Convert the buffer name to lowercase */
+
+    buff = alloc_mbuf("atr_str_objid");
+    for (p = buff, q = s; *q && ((p - buff) < (MBUF_SIZE - 1)); p++, q++)
+	*p = ToLower((int)*q);
+    *p = '\0';
+
+    /* Look for a predefined attribute */
+
+    a = (ATTR *) hashfind(buff, &mudstate.attr_name_htab);
+    if (a != NULL) {
+	free_mbuf(buff);
+	return a;
+    }
+    /* Nope, look for a user attribute */
+
+    if ( mudstate.nolookie )
+       va = NULL;
+    else
+       va = (VATTR *) vattr_find(buff);
+    free_mbuf(buff);
+
+    /* If we got one, load tattr and return a pointer to it. */
+
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_str_exec(char *s)
+{
+    char *buff, *p, *q;
+    ATTR *a;
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Convert the buffer name to lowercase */
+
+    buff = alloc_mbuf("atr_str_exec");
+    for (p = buff, q = s; *q && ((p - buff) < (MBUF_SIZE - 1)); p++, q++)
+	*p = ToLower((int)*q);
+    *p = '\0';
+
+    /* Look for a predefined attribute */
+
+    a = (ATTR *) hashfind(buff, &mudstate.attr_name_htab);
+    if (a != NULL) {
+	free_mbuf(buff);
+	return a;
+    }
+    /* Nope, look for a user attribute */
+
+    if ( mudstate.nolookie )
+       va = NULL;
+    else
+       va = (VATTR *) vattr_find(buff);
+    free_mbuf(buff);
+
+    /* If we got one, load tattr and return a pointer to it. */
+
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_str_atrpeval(char *s)
+{
+    char *buff, *p, *q;
+    ATTR *a;
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Convert the buffer name to lowercase */
+
+    buff = alloc_mbuf("atr_str_atrpeval");
+    for (p = buff, q = s; *q && ((p - buff) < (MBUF_SIZE - 1)); p++, q++)
+	*p = ToLower((int)*q);
+    *p = '\0';
+
+    /* Look for a predefined attribute */
+
+    a = (ATTR *) hashfind(buff, &mudstate.attr_name_htab);
+    if (a != NULL) {
+	free_mbuf(buff);
+	return a;
+    }
+    /* Nope, look for a user attribute */
+
+    if ( mudstate.nolookie )
+       va = NULL;
+    else
+       va = (VATTR *) vattr_find(buff);
+    free_mbuf(buff);
+
+    /* If we got one, load tattr and return a pointer to it. */
+
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_str_parseatr(char *s)
+{
+    char *buff, *p, *q;
+    ATTR *a;
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Convert the buffer name to lowercase */
+
+    buff = alloc_mbuf("atr_str_parseatr");
+    for (p = buff, q = s; *q && ((p - buff) < (MBUF_SIZE - 1)); p++, q++)
+	*p = ToLower((int)*q);
+    *p = '\0';
+
+    /* Look for a predefined attribute */
+
+    a = (ATTR *) hashfind(buff, &mudstate.attr_name_htab);
+    if (a != NULL) {
+	free_mbuf(buff);
+	return a;
+    }
+    /* Nope, look for a user attribute */
+
+    if ( mudstate.nolookie )
+       va = NULL;
+    else
+       va = (VATTR *) vattr_find(buff);
+    free_mbuf(buff);
+
+    /* If we got one, load tattr and return a pointer to it. */
+
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
 
 ATTR *
 atr_str_notify(char *s)
@@ -1606,6 +1824,150 @@ anum_extend(int newtop)
 /* ---------------------------------------------------------------------------
  * atr_num: Look up an attribute by number.
  */
+ATTR *
+atr_num_objid(int anum)
+{
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Look for a predefined attribute */
+
+    if (anum < A_USER_START)
+	return anum_get(anum);
+
+    if (anum > anum_alc_top)
+	return NULL;
+
+    /* It's a user-defined attribute, we need to copy data */
+
+    va = (VATTR *) anum_get(anum);
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_num_exec(int anum)
+{
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Look for a predefined attribute */
+
+    if (anum < A_USER_START)
+	return anum_get(anum);
+
+    if (anum > anum_alc_top)
+	return NULL;
+
+    /* It's a user-defined attribute, we need to copy data */
+
+    va = (VATTR *) anum_get(anum);
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_num_aladd(int anum)
+{
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Look for a predefined attribute */
+
+    if (anum < A_USER_START)
+	return anum_get(anum);
+
+    if (anum > anum_alc_top)
+	return NULL;
+
+    /* It's a user-defined attribute, we need to copy data */
+
+    va = (VATTR *) anum_get(anum);
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_num_pinfo(int anum)
+{
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Look for a predefined attribute */
+
+    if (anum < A_USER_START)
+	return anum_get(anum);
+
+    if (anum > anum_alc_top)
+	return NULL;
+
+    /* It's a user-defined attribute, we need to copy data */
+
+    va = (VATTR *) anum_get(anum);
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
+
+ATTR *
+atr_num_ex(int anum)
+{
+    VATTR *va;
+    static ATTR tattr;
+
+    /* Look for a predefined attribute */
+
+    if (anum < A_USER_START)
+	return anum_get(anum);
+
+    if (anum > anum_alc_top)
+	return NULL;
+
+    /* It's a user-defined attribute, we need to copy data */
+
+    va = (VATTR *) anum_get(anum);
+    if (va != NULL) {
+	tattr.name = va->name;
+	tattr.number = va->number;
+	tattr.flags = va->flags;
+	tattr.check = NULL;
+	return &tattr;
+    }
+    /* All failed, return NULL */
+
+    return NULL;
+}
 
 ATTR *
 atr_num4(int anum)
@@ -1959,7 +2321,7 @@ al_add(dbref thing, int attrnum)
     ATTR *attr;
     dbref aowner2;
     int i, i_array[LIMIT_MAX], aflags2;
-    char *s_chkattr, *s_buffptr;
+    char *s_chkattr, *s_buffptr, *tstrtokr;
 #endif
     /* If trying to modify List attrib, return.  Otherwise, get the
      * attribute list. */
@@ -1981,7 +2343,7 @@ al_add(dbref thing, int attrnum)
     if ((attrnum >= A_USER_START) && (db[thing].nvattr >= mudconf.vlimit)) {
       if (mudstate.vlplay != NOTHING) {
 #ifndef STANDALONE
-	attr = atr_num(attrnum);
+	attr = atr_num_aladd(attrnum);
         notify_quiet(mudstate.vlplay,"Variable attribute limit reached.");
 	STARTLOG(LOG_SECURITY, "SEC", "VLIMIT")
 	  log_text("Variable attribute limit reached -> Player: ");
@@ -2028,17 +2390,17 @@ al_add(dbref thing, int attrnum)
           }
        }
        if ( player != NOTHING ) {
-	  attr = atr_num(attrnum);
+	  attr = atr_num_aladd(attrnum);
           s_chkattr = atr_get(player, A_DESTVATTRMAX, &aowner2, &aflags2);
           if ( *s_chkattr ) {
              i_array[0] = i_array[2] = 0;
              i_array[4] = i_array[1] = i_array[3] = -2;
-             for (s_buffptr = (char *) strtok(s_chkattr, " "), i = 0;
+             for (s_buffptr = (char *) strtok_r(s_chkattr, " ", &tstrtokr), i = 0;
                   s_buffptr && (i < LIMIT_MAX);
-                  s_buffptr = (char *) strtok(NULL, " "), i++) {
+                  s_buffptr = (char *) strtok_r(NULL, " ", &tstrtokr), i++) {
                  i_array[i] = atoi(s_buffptr);
              }
-             if ( i_array[1] != -1 ) {
+             if ( (i_array[1] != -1) && !((i_array[1] == -2) && ((Wizard(mudstate.vlplay) ? mudconf.wizmax_vattr_limit : mudconf.max_vattr_limit) == -1)) ) {
                 if ( (i_array[0]+1) > 
                      (i_array[1] == -2 ? (Wizard(mudstate.vlplay) ? mudconf.wizmax_vattr_limit : mudconf.max_vattr_limit) : i_array[1]) ) {
                    notify_quiet(mudstate.vlplay,"Variable attribute new creation maximum reached.");
@@ -2082,7 +2444,7 @@ al_add(dbref thing, int attrnum)
        }
     }
     if ( attrnum > 2000000000 ) {
-       attr = atr_num(attrnum);
+       attr = atr_num_aladd(attrnum);
        broadcast_monitor(mudstate.vlplay,MF_VLIMIT,"V-ATTRIBUTE CEILING REACHED",
                          NULL, NULL, thing, 0, 0, NULL);
        STARTLOG(LOG_SECURITY, "SEC", "VCEILING")
@@ -2138,7 +2500,7 @@ al_delete(dbref thing, int attrnum)
     char *abuf, *cp, *dp;
 #ifndef STANDALONE
     ATTR *attr;
-    char *s_chkattr, *s_buffptr, *s_mbuf;
+    char *s_chkattr, *s_buffptr, *s_mbuf, *tstrtokr;
     dbref aowner2, player;
     int aflags2, i_array[LIMIT_MAX], i;
 #endif
@@ -2183,17 +2545,17 @@ al_delete(dbref thing, int attrnum)
           }
        }
        if ( player != NOTHING ) {
-	  attr = atr_num(attrnum);
+	  attr = atr_num_aladd(attrnum);
           s_chkattr = atr_get(player, A_DESTVATTRMAX, &aowner2, &aflags2);
           if ( *s_chkattr ) {
              i_array[0] = i_array[2] = 0;
              i_array[4] = i_array[1] = i_array[3] = -2;
-             for (s_buffptr = (char *) strtok(s_chkattr, " "), i = 0;
+             for (s_buffptr = (char *) strtok_r(s_chkattr, " ", &tstrtokr), i = 0;
                   s_buffptr && (i < LIMIT_MAX);
-                  s_buffptr = (char *) strtok(NULL, " "), i++) {
+                  s_buffptr = (char *) strtok_r(NULL, " ", &tstrtokr), i++) {
                  i_array[i] = atoi(s_buffptr);
              }
-             if ( i_array[1] != -1 ) {
+             if ( (i_array[1] != -1) && !((i_array[1] == -2) && ((Wizard(mudstate.vlplay) ? mudconf.wizmax_vattr_limit : mudconf.max_vattr_limit) == -1)) ) {
                 if ( (i_array[0]+1) > 
                      (i_array[1] == -2 ? (Wizard(mudstate.vlplay) ? mudconf.wizmax_vattr_limit : mudconf.max_vattr_limit) : i_array[1]) ) {
                    notify_quiet(mudstate.vlplay,"Variable attribute new creation (del) maximum reached.");
@@ -2389,7 +2751,7 @@ atr_clr(dbref thing, int atr)
 	s_Flags(thing, Flags(thing) & ~HAS_STARTUP);
 	break;
     case A_PROTECTNAME:
-	s_Flags4(thing, Flags(thing) & ~HAS_PROTECT);
+	s_Flags4(thing, Flags4(thing) & ~HAS_PROTECT);
 	break;
     case A_FORWARDLIST:
 	s_Flags2(thing, Flags2(thing) & ~HAS_FWDLIST);
@@ -2439,7 +2801,7 @@ atr_add_raw(dbref thing, int atr, char *buff)
 	s_Flags(thing, Flags(thing) | HAS_STARTUP);
 	break;
     case A_PROTECTNAME:
-	s_Flags4(thing, Flags(thing) | HAS_PROTECT);
+	s_Flags4(thing, Flags4(thing) | HAS_PROTECT);
 	break;
     case A_FORWARDLIST:
 	s_Flags2(thing, Flags2(thing) | HAS_FWDLIST);
@@ -2607,7 +2969,7 @@ atr_pget_str(char *s, dbref thing, int atr, dbref * owner, int *flags, int *reto
             }
 	}
 	if ((lev == 0) && Good_obj(Parent(parent))) {
-	    ap = atr_num(atr);
+	    ap = atr_num_pinfo(atr);
 	    if (!ap || ap->flags & AF_PRIVATE)
 		break;
 	}
@@ -2702,7 +3064,7 @@ atr_pget_info(dbref thing, int atr, dbref * owner, int *flags)
 		return 1;
 	}
 	if ((lev == 0) && Good_obj(Parent(parent))) {
-	    ap = atr_num(atr);
+	    ap = atr_num_pinfo(atr);
 	    if (!ap || ap->flags & AF_PRIVATE)
 		break;
 	}
@@ -2817,11 +3179,13 @@ atr_cpy(dbref player, dbref dest, dbref source)
 	    aowner = owner;	/* chg owner */
 	at = atr_num(attr);
 	if (attr) {
-	    if ((attr != A_MONEY) && Write_attr(owner, dest, at, aflags))
+	    if ((attr != A_MONEY) && Write_attr(owner, dest, at, aflags)) {
 		/* Only set attrs that owner has perm to set */
     		mudstate.vlplay = player;
-                if ( !((aflags & AF_NOCLONE) || (at && (at->flags & AF_NOCLONE))) )
+                if ( !((aflags & AF_NOCLONE) || (at && (at->flags & AF_NOCLONE))) ) {
 		   atr_add(dest, attr, buf, aowner, aflags);
+                }
+            }
 	}
 	free_lbuf(buf);
     }
@@ -3350,7 +3714,7 @@ NDECL(db_make_minimal)
     /* Safer passwords don't allow #1 creation here.  Bad bad mojo */
     safepwd_chk = mudconf.safer_passwords;
     mudconf.safer_passwords = 0;
-    obj = create_player((char *) "Wizard", (char *) "Nyctasia", NOTHING, 0);
+    obj = create_player((char *) "Wizard", (char *) "Nyctasia", NOTHING, 0, (char *)"Wizard", 0);
     mudconf.safer_passwords = safepwd_chk;
     s_Flags(obj, Flags(obj) | IMMORTAL);
     s_Flags2(obj, Flags2(obj) & ~WANDERER);
@@ -3365,6 +3729,98 @@ NDECL(db_make_minimal)
 
 #endif
 
+dbref
+parse_dbref_special(char *s) {
+   char *p, *q, *r;
+   int x;
+#ifndef STANDALONE
+   char *atext, *buff;
+   int aflags, i_id, i_id_found;
+   double y, z;
+   struct tm *ttm;
+   long l_offset, mynow;
+   dbref aowner;
+   ATTR *a_id;
+#endif
+
+   r = q = strchr(s, ':');
+   *q = '\0';
+   q++;
+
+   for (p = s; *p; p++) {
+      if (!isdigit((int)*p)) {
+         *r = ':';
+         return NOTHING;
+      }
+   }
+   x = atoi(s); 
+   *r = ':';
+#ifndef STANDALONE
+   if ( Good_chk(x) ) {
+      if ( NoTimestamp(x) ) {
+         return ((x >= 0) ? x : NOTHING);
+      }
+      i_id = mkattr("__OBJID_INTERNAL");
+      i_id_found = 0;
+      if (i_id > 0) {
+         a_id = atr_num_objid(i_id);
+         if (a_id) {
+            i_id_found = 1;
+            atext = atr_get(x, a_id->number, &aowner, &aflags);
+            if ( atext && *atext ) {
+               i_id_found = 2;
+               y = safe_atof(atext);
+            }
+            free_lbuf(atext);
+         }
+      }
+
+      if ( i_id_found == 2 ) {
+         z = safe_atof(q);
+         if ( y == z ) {
+            return ((x >= 0) ? x : NOTHING);
+         }
+         x = -1;
+      } else {
+         atext = atr_get(x, A_CREATED_TIME, &aowner, &aflags);
+         if ( atext && *atext ) {
+            if ( mudconf.objid_localtime ) {
+               ttm = localtime(&mudstate.now);
+            } else {
+               ttm = localtime(&mudstate.now);
+               mynow = mktime(ttm);
+               ttm = gmtime(&mudstate.now);
+               mynow -= mktime(ttm);
+            }
+            l_offset = (long) mktime(ttm) - (long) mush_mktime64(ttm);
+            if (do_convtime(atext, ttm)) {
+               if ( mudconf.objid_localtime ) {
+                  y = (double)(mush_mktime64(ttm) + l_offset);
+               } else {
+                  y = (double)(mush_mktime64(ttm) + l_offset + mynow + mudconf.objid_offset);
+               }
+               if ( i_id_found == 1 ) {
+                  buff = alloc_sbuf("create_objid");
+                  sprintf(buff, "%.0f", y);
+                  atr_add_raw(x, a_id->number, buff);
+                  atr_set_flags(x, a_id->number, AF_INTERNAL|AF_GOD);
+                  free_sbuf(buff);
+               }
+               z = safe_atof(q);
+               if ( y == z ) {
+                  free_lbuf(atext);
+                  return ((x >= 0) ? x : NOTHING);
+               }
+            }
+         }
+         free_lbuf(atext);
+         x = -1;
+      }
+   }
+#endif
+   return ((x >= 0) ? x : NOTHING);
+}
+
 dbref 
 parse_dbref(const char *s)
 {
@@ -3375,6 +3831,11 @@ parse_dbref(const char *s)
     if ( !*s )
        return NOTHING;
 
+#ifndef STANDALONE
+    if ( mudconf.enable_tstamps && (strchr(s, ':') != NULL) ) {
+       return parse_dbref_special((char *)s);
+    }
+#endif
     for (p = s; *p; p++) {
 	if (!isdigit((int)*p))
 	    return NOTHING;
@@ -3542,7 +4003,7 @@ void do_dbclean(dbref player, dbref cause, int key)
    DESC *d;
 
    DESC_ITER_CONN(d) {
-      if ( (d->player == player) ) {
+      if ( d->player == player ) {
          if ( key & DBCLEAN_CHECK )
             queue_string(d,"Checking dabase of empty attributes.  Please wait...");
          else
@@ -3555,7 +4016,7 @@ void do_dbclean(dbref player, dbref cause, int key)
    s_chkattr = alloc_lbuf("attribute_delete");
 
    DESC_ITER_CONN(d) {
-      if ( (d->player == player) ) {
+      if ( d->player == player ) {
          queue_string(d, "---> Hashing values...");
          queue_write(d, "\r\n", 2);
          process_output(d);
@@ -3565,17 +4026,19 @@ void do_dbclean(dbref player, dbref cause, int key)
       for (ca=atr_head(i, &cs); ca; ca=atr_next(&cs)) {
          if ( ca > A_USER_START ) {
             atr = atr_num2(ca);
-            va = (VATTR *) vattr_find((char *)atr->name);
-            if ( va && !(va->flags & AF_DELETED) ) {
-               if ( !(va->flags & AF_NONBLOCKING) ) {
-                  va->flags |= AF_NONBLOCKING;
+            if ( atr ) {
+               va = (VATTR *) vattr_find((char *)atr->name);
+               if ( va && !(va->flags & AF_DELETED) ) {
+                  if ( !(va->flags & AF_NONBLOCKING) ) {
+                     va->flags |= AF_NONBLOCKING;
+                  }
                }
             }
          }
       }
    }
    DESC_ITER_CONN(d) {
-      if ( (d->player == player) ) {
+      if ( d->player == player ) {
          if ( key & DBCLEAN_CHECK )
             queue_string(d, "---> Initializing check routines...");
          else
@@ -3594,14 +4057,18 @@ void do_dbclean(dbref player, dbref cause, int key)
        if ( va )
           va2 = vattr_next(va);
        if ( va && !(va->flags & AF_DELETED)) {
-          if ( !(va->flags & AF_NONBLOCKING) && va->name ) {
-             strcpy(s_buff, va->name);
-             if ( key & DBCLEAN_CHECK )
+          if ( va->command_flag == 0 ) {
+             if ( !(va->flags & AF_NONBLOCKING) && va->name ) {
+                strcpy(s_buff, va->name);
+                if ( key & DBCLEAN_CHECK )
+                   va->flags &= ~AF_NONBLOCKING;
+                else
+	           vattr_delete(s_buff);
+                i_del++;
+                i_cntr++;
+             } else {
                 va->flags &= ~AF_NONBLOCKING;
-             else
-	        vattr_delete(s_buff);
-             i_del++;
-             i_cntr++;
+             }
           } else {
              va->flags &= ~AF_NONBLOCKING;
           }
@@ -3612,7 +4079,7 @@ void do_dbclean(dbref player, dbref cause, int key)
                   i_walkie, i_max, i_del, ((key & DBCLEAN_CHECK) ? "would be deleted" : "deleted") );
           i_del = 0;
           DESC_ITER_CONN(d) {
-             if ( (d->player == player) ) {
+             if ( d->player == player ) {
                 queue_string(d, s_chkattr);
                 queue_write(d, "\r\n", 2);
                 process_output(d);
@@ -3624,7 +4091,7 @@ void do_dbclean(dbref player, dbref cause, int key)
       sprintf(s_chkattr, "---> %10d/%10d attributes processed [%d %s]\r\n---> Completed!  %d total attributes have been %s.", 
                           i_walkie, i_max, i_del, ((key & DBCLEAN_CHECK) ? "would be deleted" : "deleted"),
                           i_cntr, ((key & DBCLEAN_CHECK) ? "verified deleteable" : "deleted") );
-      if ( (d->player == player) ) {
+      if ( d->player == player ) {
          queue_string(d, s_chkattr);
          queue_write(d, "\r\n", 2);
          process_output(d);

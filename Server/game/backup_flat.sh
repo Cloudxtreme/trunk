@@ -34,11 +34,13 @@
 # INIT_RCP - initialize the RCP/SCP and/or NCFTPPUT remote archivers
 #----------------------------------------------------------------------------
 # RCP - path and binary to use for rcp/scp copy
+# RCPOPTS - Options to pass to RCP.  Example if you're using scp you can
+#           give it special options here like a separate port
 # NCFTP - path and binary to use for ncftpput
 # NCFTPFILE - filename that is used to store login/password info for ncftpput
 #             We force this file user read only for safty
 #             You need to edit this file with your login/password/host info!
-# EMAIL - Login/password combination to use for rcp/scp backups
+# CPLOGIN - Login/password combination to use for rcp/scp backups
 # BKUPPATH - remote path you wish backups to go
 # ENABLEREMOTE - toggle to enable/disable remote backup and specify type
 #                0 - none, 1 - rcp/scp, 2 - ncftp, 3 - nail (or other mailprg)
@@ -47,10 +49,12 @@
 # MAILSUBJ - subject for the mail system
 # MAILTO - where to send the mail to
 # MAILMSG - message you want included in any mail with the logs
+# MUTTFIX - If your mail program is mutt, uncomment this line for mailing.
 #############################################################################
 init_rcp() {
    RCP=/usr/bin/scp	
-   EMAIL=none@none.com
+#  RCPOPTS="-P 22"
+   CPLOGIN=none@none.com
    BKUPPATH=/home/none
    NCFTP=/usr/bin/ncftpput
    NCFTPFILE=./.rfile
@@ -61,6 +65,7 @@ init_rcp() {
    MAILSUBJ="RhostMUSH Backup"
    MAILTO="$LOGNAME@localhost"
    MAILMSG="The backup was successful"
+   #MUTTFIX="--"
 }
 #############################################################################
 
@@ -71,7 +76,7 @@ init_rcp() {
 # MAILPROG - the mail program that is used to email
 #############################################################################
 init_logging() {
-   ERRMAIL=${LOGNAME}
+   ERRMAIL=${MAILTO}
    ERRMAILPROG=mail		
 }
 #############################################################################
@@ -117,6 +122,7 @@ init_datapaths() {
 # DOARCH - "yes" puts the most recient archive in 'prevflat' if desired
 # TXTFILES - all your .txt files you wish archived
 # IMPORTANTFILES - any other file other than .txt files you want included
+# SQLFILES - Uncomment (remove the # from the beginning) to backup these
 #############################################################################
 init_vars() {
    MAXBACKUPS=7
@@ -131,7 +137,10 @@ init_vars() {
              txt/guest.txt txt/motd.txt txt/news.txt txt/newuser.txt \
              txt/noguest.txt txt/quit.txt txt/register.txt txt/wizmotd.txt \
              txt/plushelp.txt"
-   IMPORTANTFILES="netrhost.conf"
+   IMPORTANTFILES="alias.conf muxalias.conf rhost_ingame.conf \
+                   alternate_netrhost.conf netrhost.conf rhost_mysql.conf \
+                   compat.conf pennalias.conf tm3alias.conf data/netrhost.SIGHUP.flat"
+#  SQLFILES="sqlite/*"
 }
 #############################################################################
 
@@ -210,15 +219,16 @@ do_full_backup() {
          while [ ${CNTR} -ne 0 ]
          do
             NEWCNTR=$(expr $CNTR + 1)
-            test -f ${OLDFLAT}/"${MAILNEWSDB}".dbflat${CNTR}.tar.gz && \
-                    mv -f ${OLDFLAT}/"${MAILNEWSDB}".dbflat${CNTR}.tar.gz \
-                             ${OLDFLAT}/"${MAILNEWSDB}".dbflat${NEWCNTR}.tar.gz
+            test -f ${OLDFLAT}/"${MAILNEWSDB}".dbflat${CNTR}.tar.${COMPREXT} && \
+                    mv -f ${OLDFLAT}/"${MAILNEWSDB}".dbflat${CNTR}.tar.${COMPREXT} \
+                             ${OLDFLAT}/"${MAILNEWSDB}".dbflat${NEWCNTR}.tar.${COMPREXT}
             CNTR=$(expr $CNTR - 1)
          done
          tar -cvf $OLDFLAT/"${MAILNEWSDB}".dbflat1.tar ./data/"${MAINDBNAME}".db.flat \
                   ./data/"${MAILNEWSDB}".news.flat ./data/"${MAILNEWSDB}".dump.mail \
                   ./data/"${MAILNEWSDB}".areg.dump  ./data/"${MAILNEWSDB}".dump.folder \
-                  ${TXTFILES} ${IMPORTANTFILES} 2>/dev/null 1>&2
+                  ./data/netrhost.SIGHUP.flat \
+                  ${TXTFILES} ${IMPORTANTFILES} ${SQLFILES} 2>/dev/null 1>&2
          ${COMPREXE} -f ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar
          if [ "${DOARCH}" = "yes" ]
          then
@@ -227,6 +237,7 @@ do_full_backup() {
             mv -f ./data/"${MAILNEWSDB}".dump.mail ${PREVFLAT} 2>/dev/null
             mv -f ./data/"${MAILNEWSDB}".dump.folder ${PREVFLAT} 2>/dev/null
             mv -f ./data/"${MAILNEWSDB}".areg.dump ${PREVFLAT} 2>/dev/null
+            mv -f ./data/netrhost.SIGHUP.flat ${PREVFLAT} 2> /dev/null
          fi
 }
 #############################################################################
@@ -239,9 +250,9 @@ do_partial_backup() {
          while [ ${CNTR} -ne 0 ]
          do
             NEWCNTR=$(expr $CNTR + 1)
-            test -f ${OLDFLAT}/"${MAILNEWSDB}".flat.${CNTR}.gz && \
-                  mv -f ${OLDFLAT}/"${MAILNEWSDB}".flat.${CNTR}.gz \
-                            ${OLDFLAT}/"${MAILNEWSDB}".flat.${NEWCNTR}.gz
+            test -f ${OLDFLAT}/"${MAILNEWSDB}".flat.${CNTR}.${COMPREXT} && \
+                  mv -f ${OLDFLAT}/"${MAILNEWSDB}".flat.${CNTR}.${COMPREXT} \
+                            ${OLDFLAT}/"${MAILNEWSDB}".flat.${NEWCNTR}.${COMPREXT}
             CNTR=$(expr ${CNTR} - 1)
          done
          mv -f ./data/"${MAINDBNAME}".db.flat ${OLDFLAT}/"${MAILNEWSDB}".flat.1 2>/dev/null
@@ -283,26 +294,26 @@ do_remote_copy() {
    then
       if [ ${ENABLEREMOTE} -eq 1 ]
       then
-         ${RCP} ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar.${COMPREXT} ${EMAIL}:${BKUPPATH}
+         ${RCP} ${RCPOPTS} ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar.${COMPREXT} ${CPLOGIN}:${BKUPPATH}
       elif [ ${ENABLEREMOTE} -eq 2 ]
       then
          ${NCFTP} -f ${NCFTPFILE} ${BKUPPATH} ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar.${COMPREXT}
       elif [ ${ENABLEREMOTE} -eq 3 ]
       then
-         echo "${MAILMSG}"|${MAILPROG} -s "${MAILSUBJ}" ${MAILATTACH} ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar.${COMPREXT} ${MAILTO}
+         echo "${MAILMSG}"|${MAILPROG} -s "${MAILSUBJ}" ${MAILATTACH} ${OLDFLAT}/"${MAILNEWSDB}".dbflat1.tar.${COMPREXT} ${MUTTFIX} ${MAILTO}
       else
          echo "" > /dev/null
       fi
    else
       if [ ${ENABLEREMOTE} -eq 1 ]
       then
-         ${RCP} ${OLDFLAT}/"${MAILNEWSDB}".flat.1.${COMPREXT} ${EMAIL}:${BKUPPATH}
+         ${RCP} ${RCPOPTS} ${OLDFLAT}/"${MAILNEWSDB}".flat.1.${COMPREXT} ${CPLOGIN}:${BKUPPATH}
       elif [ ${ENABLEREMOTE} -eq 2 ]
       then
          ${NCFTP} -f ${NCFTPFILE} ${BKUPPATH} ${OLDFLAT}/"${MAILNEWSDB}".flat.1.${COMPREXT}
       elif [ ${ENABLEREMOTE} -eq 3 ]
       then
-         echo "${MAILMSG}"|${MAILPROG} -s "${MAILSUBJ}" ${MAILATTACH} ${OLDFLAT}/"${MAILNEWSDB}".flat.1.${COMPREXT} ${MAILTO}
+         echo "${MAILMSG}"|${MAILPROG} -s "${MAILSUBJ}" ${MAILATTACH} ${OLDFLAT}/"${MAILNEWSDB}".flat.1.${COMPREXT} ${MUTTFIX} ${MAILTO}
       else
          echo "" > /dev/null
       fi

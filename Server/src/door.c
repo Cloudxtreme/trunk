@@ -150,7 +150,6 @@ static int addDoor(const char *doorName,
 		   doorInput_t  pFnRead,
 		   int bitLvl, int loc) {
   int door, deAlloc = 0;
-  void *v_toss;
   DPUSH; /* 3 */
   door = findDoor(doorName);
   if (door > 0) {
@@ -163,7 +162,7 @@ static int addDoor(const char *doorName,
 
   if (gnDoors == (maxDoors - 1)) {
     // grow array
-    v_toss = realloc(gaDoors, sizeof(door_t) * (maxDoors + 5));
+    gaDoors = realloc(gaDoors, sizeof(door_t) * (maxDoors + 5));
     if (gaDoors == NULL) {
       LOGTEXT("ERR", -1, "Could not allocate memory for resizing door array.");
       RETURN(-1); /* 3 */      
@@ -234,7 +233,7 @@ static int addDoor(const char *doorName,
   if (pFnInit) {
     if (pFnInit() < 0) {
       LOGTEXT("ERR", -1, 
-	      unsafe_tprintf("Could not initialize door '%s'\n", doorName));
+	      unsafe_tprintf("Could not initialize door '%s'\r\n", doorName));
       goto error;
     }
   }
@@ -243,7 +242,7 @@ static int addDoor(const char *doorName,
     if (pFnOpen(gaDoors[gnDoors]->pDescriptor, 0, NULL, gnDoors) < 0) {
       gaDoors[gnDoors]->doorStatus = OFFLINE_e;
       LOGTEXT("ERR", -1,
-	      unsafe_tprintf("Failed to open internal door '%s'\n", doorName));
+	      unsafe_tprintf("Failed to open internal door '%s'\r\n", doorName));
     }
   }
 
@@ -334,32 +333,32 @@ void door_raw_output(DESC *d, char *output)
 static int setup_player(DESC *d, int sock, int doorIdx) {
   int retval = sock;
 
-  if (sock >= 0)
-    d->door_lbuf = alloc_lbuf("door_lbuf");
-    if (d->door_lbuf == NULL) {
-      close(sock);
-      queue_string(d, "Could not allocate door buffer\r\n");
-      retval = -1;
-    }
-    *(d->door_lbuf) = '\0';
+  if (sock >= 0) {
+      d->door_lbuf = alloc_lbuf("door_lbuf");
+      if (d->door_lbuf == NULL) {
+          close(sock);
+          queue_string(d, "Could not allocate door buffer\r\n");
+          retval = -1;
+      }
+      *(d->door_lbuf) = '\0';
+      d->door_mbuf = alloc_mbuf("door_lbuf");
+      if ( (sock >= 0) && d->door_mbuf == NULL ) {
+          close(sock);
+          queue_string(desc_in_use, "Could not allocate door buffer\r\n");
+          free_lbuf(d->door_lbuf);
+          d->door_lbuf = NULL;
+          retval = -1;
+      }
 
-    d->door_mbuf = alloc_mbuf("door_lbuf");
-    if (d->door_mbuf == NULL && sock >= 0) {
-      close(sock);
-      queue_string(desc_in_use, "Could not allocate door buffer\r\n");
-      free_lbuf(d->door_lbuf);
-      d->door_lbuf = NULL;
-      retval = -1;
-    }
-
-    if (retval >= 0) {
-      *(d->door_mbuf) = '\0';
-      d->door_desc = sock;
-      d->flags |= DS_HAS_DOOR;   
-      d->door_num = doorIdx;
-/*    process_output(d); */
-    }
-    return sock;
+      if (retval >= 0) {
+          *(d->door_mbuf) = '\0';
+          d->door_desc = sock;
+          d->flags |= DS_HAS_DOOR;   
+          d->door_num = doorIdx;
+      /*  process_output(d); */
+      }
+  }
+  return sock;
 }
 
 int door_tcp_connect(char *host, char *port, DESC *d, int doorIdx)
@@ -479,7 +478,7 @@ int process_door_input(DESC * d)
       *pt = '\0';
       if ((strlen(d->door_raw) + strlen(buf)) < LBUF_SIZE - sizeof(CBLKHDR) -2) {
 	strcat(d->door_raw,buf);
-	strcat(d->door_raw,"\n");
+	strcat(d->door_raw,"\r\n");
 	save_door(d,d->door_raw);
 	if (*(pt+1) == '\0') {
 	  free_lbuf(d->door_raw);
@@ -499,9 +498,9 @@ int process_door_input(DESC * d)
       }
     }
   }
-  if ((strlen(buf) < LBUF_SIZE - sizeof(CBLKHDR) -1) && (*(buf + got - 1) == '\n'))
+  if ((strlen(buf) < LBUF_SIZE - sizeof(CBLKHDR) -1) && (*(buf + got - 1) == '\n')) {
     save_door(d, buf);
-  else {
+  } else {
     pt = buf + got -2;
     while ((*pt != '\n') && (pt > buf))
       pt--;
@@ -559,12 +558,12 @@ void queue_door_string(DESC *d, const char *s, int addnl)
 	len = strlen(new);
 	if (addnl) {
 	  if (len >= LBUF_SIZE-1) {
+	    *(new + LBUF_SIZE - 2) = '\r';
 	    *(new + LBUF_SIZE - 1) = '\n';
 	    *(new + LBUF_SIZE) = '\0';
 	    len = LBUF_SIZE - 1;
-	  }
-	  else {
-	    strcat(new, "\n");
+	  } else {
+	    strcat(new, "\r\n");
 	    len++;
 	  }
 	}
@@ -745,15 +744,44 @@ void modifyDoorStatus(dbref player, char *pDoorName, char * status) {
 void openDoor(dbref player, 
 	      dbref cause, 
 	      char *pDoor,
-	      int nArgs, char *args[]) {
-  int d;
+	      int nArgs, char *args[], int i_type) {
+  int d, i_now;
+  DESC *d_door, *d_use;
   DPUSH; /* #11 */
 
   d = findDoor(pDoor);
   if (d < 0) {
-    notify(player, "Bad door in open.");
+    if ( player != cause ) {
+       notify(cause, "Bad door in open for specified target.");
+    } else {
+       notify(player, "Bad door in open.");
+    }
   } else if (!isPlayer(player)) {
-    notify(player, "Only players can open a door.");
+    if ( player != cause ) {
+       notify(cause, "The target is not a player so can not use doors.");
+    } else {
+       notify(player, "Only players can open a door.");
+    }
+  } else if (desc_in_use && (desc_in_use->flags & DS_HAS_DOOR) ) {
+    if ( player != cause ) {
+       notify(cause, "Target already has a door open on the attempted connection.");
+    } else {
+       notify(player, "You already have a door open on the attempted connection.");
+    }
+  } else if (bittype(player) <  gaDoors[d]->bittype) {
+    if ( player != cause ) {
+       notify(cause, "Try as you might, you can't shove the target through that door.");
+    } else {
+       notify(player, "Try as you might, the door refuses to budge");
+    }
+  } else if (gaDoors[d]->doorStatus == OFFLINE_e){ 
+    if ( player != cause ) {
+       notify(cause, "That door is currently offline.");
+    } else {
+       notify(player, "That door is currently offline.");
+    }
+  } else if (gaDoors[d]->locTrig == dINTERNAL_e) {
+    notify(player, "Internal doors cannot be opened in this manner.");
   } else if (gaDoors[d]->locTrig != PLAYER_e &&
 	     ((gaDoors[d]->locTrig == ROOM_e && !isRoom(cause))
 	      ||
@@ -761,27 +789,69 @@ void openDoor(dbref player,
 	      ||
 	      (gaDoors[d]->locTrig >= 0 && gaDoors[d]->locTrig != cause))) {
     notify(cause, "You can't force a player to open a door."); 
-  } else if (desc_in_use == NULL) {
-    notify(player, "Door's can't be opened from a queue.");
-  } else if (desc_in_use->flags & DS_HAS_DOOR) {
-    notify(player, "You already have a door open on the attempted connection.");
-  } else if (bittype(player) <  gaDoors[d]->bittype) {
-    notify(player, "Try as you might, the door refuses to budge");
-  } else if (gaDoors[d]->doorStatus == OFFLINE_e){ 
-    notify(player, "That door is currently offline.");
-  } else if (gaDoors[d]->locTrig == dINTERNAL_e) {
-    notify(player, "Internal doors cannot be opened in this manner.");
+  } else if ( i_type || desc_in_use == NULL) {
+     if ( !isPlayer(player) ) {
+        if ( player != cause ) {
+           notify(cause, "Invalid target.  Door's can't be opened from a non-player.");
+        } else {
+           notify(player, "Only players who are connected can issue a door.");
+        }
+     } else if ( !controls(cause, player) ) {
+        notify(cause, "Sorry, you do not have permission to force the target into a door.");
+     } else {
+        i_now = 0;
+        d_use = NULL;
+        DESC_ITER_CONN(d_door) {
+           if (d_door->player == player) {
+              if ( d_door->last_time > i_now ) {
+                 d_use = d_door;
+                 i_now = d_door->last_time;
+              }
+           }
+        }
+        if ( d_use ) {
+           if ((gaDoors[d]->pFnOpenDoor)(d_use, nArgs, args, d) < 0) {
+              LOGTEXT("ERR", player, unsafe_tprintf("failed to open a door to %s", gaDoors[d]->pName));
+              if ( player != cause ) {
+                 notify(cause, "The door fails to open for the target.");
+              } else {
+                 notify(player, "The door fails to open.");
+              }
+              shut_door(d_use);
+           } else {
+              gaDoors[d]->doorStatus = OPEN_e;
+              (gaDoors[d]->nConnections)++;
+              LOGTEXT("INF", player, unsafe_tprintf("opens a door to %s", gaDoors[d]->pName));
+              if ( player != cause ) {
+                 notify(cause, unsafe_tprintf("Target %s opens a door to %s", Name(player), gaDoors[d]->pName));
+              }
+           }
+        } else {
+           if ( player != cause ) {
+              notify(cause, "Invalid target.  Door's can't be opened from a queue with an invalid or disconnected player.");
+           } else {
+              notify(player, "Sorry, we couldn't open the door for you.");
+           }
+        }
+     }
   } else {
     if ((gaDoors[d]->pFnOpenDoor)(desc_in_use, nArgs, args, d) < 0) {
       LOGTEXT("ERR", player, unsafe_tprintf("failed to open a door to %s",
 				     gaDoors[d]->pName));
-      notify(player, "The door fails to open.");
+      if ( player != cause ) {
+         notify(cause, "The door fails to open for the target player.");
+      } else {
+         notify(player, "The door fails to open.");
+      }
       shut_door(desc_in_use);
     } else {
       gaDoors[d]->doorStatus = OPEN_e;
       (gaDoors[d]->nConnections)++;
       LOGTEXT("INF", player, unsafe_tprintf("opens a door to %s",
 				     gaDoors[d]->pName));
+      if ( player != cause ) {
+         notify(cause, unsafe_tprintf("Target %s opens a door to %s", Name(player), gaDoors[d]->pName));
+      }
     }
 
   }

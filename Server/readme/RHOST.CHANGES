@@ -1,3 +1,47 @@
+                         RhostMUSH 4.0 Update File
+MUX passwords didn't work properly because of a memcmp() bug.
+				- Thanks Locke
+@nuke didn't properly wipe mail if issued from a non-player.
+				- Thanks Benzaiten & Rockpath
+@protect set/unset the wrong flags.
+				- Thanks Rockpath
+Help file typos fixed
+				- Thanks Rockpath
+Bug in EVAL could overwrite static pointer to attribute fetches
+				- Thanks Ixokai
+Bug in printf that could cause a SIGSEGV
+				- Thanks Ixokai
+Bug in AUTH and API handling where AUTH lookups happened with internal checks
+				- Thanks Neil "Polk" Stevens 
+@set and set() now allow optionally setting contents starting with '_'.
+				- Thanks Gallifrey@BrazilMUX
+Added better user error handling to the build script.
+				- Thanks qa'toq
+Due to an insanely old bug in singleuser mode with attribute caps, flatfiles
+   would cut off attributes at 750 on dbloading.
+				- Thanks Aqua@MuxNexus
+@recover/detail to show attributes and details of recoverable item
+				- Thanks Ixokai
+Suggestions in help files inspired from PennMUSH.
+				- Thanks PennMUSH (Raevnos)
+@door/push could crash with non-players
+				- Thanks Xperta/Paige
+Startmush had a confusing message for Nyctasia as #1's password
+				- Thanks Ixokai
+@rxlevel/@txlevel handle bits as well as tabs
+				- Thanks Myrddin
+@fpose/nospace didn't work because of wrong bitwise flags
+				- Thanks Myrddin
+Potential crash with freeing unitialized buffering in trace stack in eval.c
+				- Thanks Myrddin
+Crash with trace located as a 32 byte SBUF if compiled for that
+				- Thanks Myrddin
+idle_timeout included in the netrhost.conf by default as highly utilized
+				- Thanks skew
+all l*() math functions allowed empty args for backward compatibility
+				- Thanks skew
+
+
                          RhostMUSH 3.9.5 Update File
 Softcode overrides for connect files
 				- Thanks Matrix
@@ -19,6 +63,87 @@ Buffer overrun in ansi_txtfile because of non-null termination.
 				- Thanks Rook
 mail/mark/save would not alert you if you hit MAX SAVED messages.
 				- Thanks Mercutio
+old_setq had an issue with '!' parameter not reusing registers.
+				- Thanks Ixokai
+missing test case for scandir() function fixed.
+				- Thanks Maighdlin
+suggestion to make textfile() more useful in functions.
+				- Thanks qa'toq
+alteration of new Makefile build procedure rebuilt based on Ternary@Dark Metal's suggestions.
+				- Thanks Ternary/Ol'Sarge
+fix to the src/Makefile to redefine default SHELL since latest Debian horked it with dash.
+				- Thanks Mercutio
+Make '.' as first char allowable in attribute names.
+				- Thanks Ixokai
+@limit with unlimited values for @destroy and vlimit was broke.
+				- Thanks Ixokai
+@decompile didn't show @toggles
+				- Thanks Tesagk
+xinc() and xdec() didn't properly handle labels for registers.
+				- Thanks UnRegistered Guest (Wanted to be Anonymous)
+columns() bug with left justification if fed null for field.
+				- Thanks Merit
+@dynhelp/noindex to snuff the hilight index in @dynhelp.
+				- Thanks Darren
+ltoggles()/hastoggle() didn't mirror lflags()/hasflag() for permissions.
+				- Thanks Polk
+dark permission makes on-connect screen command ignored to be overridden.
+				- Thanks Ixokai
+crashbug on random error messages if error.txt was empty
+				- Thanks Darren
+compile issue when you do not have sideeffects enabled at comiletime
+				- Thanks benzaiten
+Idea for /quiet for @pipe
+				- Thanks Ixokai
+Missing showing PARIS mode enabled in WHO/DOING for @list options
+				- Thanks Myrddin
+El Capitan 10.11.5 would not compile cleanly out of the box due to sudden header file location changes.
+				- Thanks Darren
+Main Makefile no longer worked on latest FreeBSD because of their change from gmake.
+				- Thanks Oleo
+Added RPAD and LPAD softcode wrappers
+				- Thanks Darren
+Dark exits were broken with sees()
+				- Thanks Mercutio
+objid's were based on localtime and not gmtime
+				- Thanks Fantom
+Bug in safer_ufun with setting attributes on self and permissions with u().
+				- Thanks Mike/Talvo
+Improvement of help entries for @label and various documentation fixes.
+				- Thanks Mike/Talvo
+Added additional spacing to parenmatch() to help with pretty printing.
+				- Suggestion from Thenomain (thanks!)
+&pageformat and &outpageformat idea from PennMUSH
+				- Thanks Mike and the PennMUSH folk :)
+Added help entry for a suggestion on special characters.
+				- Thanks Tesagk
+Added 'd' and 'D' options for wildcarding on editansi.
+				- Thanks Anixy
+Removed attribute flags from @decompile/tf
+				- Thanks Darren
+Potential crash bug with flag-handling with NONAME in use.
+				- Thanks Polk & Aqua
+Missing free on an sbuf in sqlite.c
+				- Thanks Darren
+Added %_<-> to pop last label used.
+				- Suggestion -- Ixokai
+Nested /notrace on @function/@lfunction was broke.
+				- Thanks Ixokai
+Idea and general code for NO_CONNECT message -- Kage
+				- Thanks Kage
+Alternate date formats for convtime()
+				- Thanks Ixokai
+Typos in help.txt
+				- Thanks Kilmoran
+all localization didn't save state for register names.
+				- Thanks Myrddin
+All locatization with CLEAR didn't wipe and reset register names.
+				- Thanks Myrddin
+&SPEECH_PREFIX/&SPEECH_SUFFIX for say/pose pre and post processing.
+				- Thanks MuSoapBox (Auspice, Sparks, Seamus, faraday, Thenomain, and others)
+] for @hook/ignore and @hook/permit was broken.
+				- Thanks Ixokai
+
 
 
 		         RhostMUSH 3.9.4 Update File
